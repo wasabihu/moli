@@ -1355,14 +1355,14 @@ impl PageScriptHost {
         document_owner: FrameDocumentTaskOwner,
         reaction_id: u64,
         reason: String,
-        error_constructor: Option<ScriptErrorConstructorKind>,
+        error_value: Option<crate::types::ScriptErrorValue>,
     ) {
         self.queue_page_module_reaction(
             RendererPageModuleReactionEvent::DocumentModuleScriptEvaluationRejected {
                 document_owner,
                 reaction_id,
                 reason,
-                error_constructor,
+                error_value,
             },
         );
     }
@@ -1388,7 +1388,7 @@ impl PageScriptHost {
         realm_id: crate::frame_owner_model::FrameRealmId,
         reaction_id: u64,
         reason: String,
-        error_constructor: Option<ScriptErrorConstructorKind>,
+        error_value: Option<crate::types::ScriptErrorValue>,
     ) {
         self.queue_page_module_reaction(
             RendererPageModuleReactionEvent::ChildParserModuleEvaluationRejected {
@@ -1396,7 +1396,7 @@ impl PageScriptHost {
                 realm_id,
                 reaction_id,
                 reason,
-                error_constructor,
+                error_value,
             },
         );
     }
