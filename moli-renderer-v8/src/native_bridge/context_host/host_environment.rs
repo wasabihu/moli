@@ -890,14 +890,18 @@ impl PageScriptHost {
         viewport_surface: Option<crate::protocol_types::ViewportSurface>,
     ) -> bool {
         let changed = self.viewport_surface() != viewport_surface;
-        let previous =
-            (changed && self.layout_policy().is_realtime()).then(|| self.style_viewport());
-        if changed {
+        let previous_viewport = self.style_viewport();
+        unsafe { &mut *self.document_runtime }.set_viewport_surface(viewport_surface);
+        let viewport = self.style_viewport();
+        if viewport != previous_viewport {
             self.invalidate_layout_inputs(LayoutInputChange::StyleEnvironment);
         }
-        unsafe { &mut *self.document_runtime }.set_viewport_surface(viewport_surface);
-        if let Some(previous_viewport) = previous {
-            let viewport = self.style_viewport();
+        if changed {
+            self.document_layout_state
+                .get_mut()
+                .mark_visual_state_dirty();
+        }
+        if changed && self.layout_policy().is_realtime() {
             if (previous_viewport.width != viewport.width
                 || previous_viewport.height != viewport.height)
                 && let Some(target) = self.current_window_document_task_target_for_dispatch_scope(
