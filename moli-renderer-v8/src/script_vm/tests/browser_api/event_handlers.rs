@@ -4,6 +4,7 @@ mod child_window;
 mod compilation;
 mod object_values;
 mod popup;
+mod popup_window;
 
 #[test]
 fn native_mouse_event_coordinate_accessors() {
