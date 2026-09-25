@@ -134,8 +134,9 @@ impl PageScriptHost {
                 .lightweight_popup_policy_container(popup_id)
                 .is_some_and(allows),
             OwnerDispatchScope::Child(handle) => self
-                .child_browsing_context_policy_container_snapshot(handle)
-                .is_some_and(|policy| allows(&policy)),
+                .child_browsing_contexts
+                .get(&handle)
+                .is_some_and(|entry| allows(entry.document_policy_container())),
         }
     }
 
