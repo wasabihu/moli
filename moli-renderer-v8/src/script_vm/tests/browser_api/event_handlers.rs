@@ -7,6 +7,7 @@ mod parser_merged_body;
 mod popup;
 mod popup_callback_owner;
 mod popup_window;
+mod surface;
 
 #[test]
 fn native_mouse_event_coordinate_accessors() {
