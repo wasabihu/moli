@@ -2395,6 +2395,7 @@ mod indexed_db;
 mod indexed_db_gc;
 mod inspector_unwrap;
 mod intersection_observers;
+mod intersection_target_order;
 mod javascript_url_origin;
 mod joint_history;
 mod lazy_storage;
@@ -2458,6 +2459,7 @@ mod node_reflection_native_receivers;
 
 mod document_attribute_factory_realms;
 
+mod response_blob_mime;
 mod retained_child_window;
 mod script_terminal_completion;
 mod speech_events;
@@ -2525,13 +2527,9 @@ mod worklet_interfaces;
 mod resource_initiator;
 
 mod body_mime_consolidation;
-
-mod websocket_close_dictionary;
-
-mod intersection_target_order;
 mod observer_element_arguments;
 mod report_body_interface_exposure;
-mod response_blob_mime;
+mod websocket_close_dictionary;
 
 mod media_device_interfaces;
 
