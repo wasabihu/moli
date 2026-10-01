@@ -1,4 +1,5 @@
 use super::*;
+use crate::event_type::{EventType, EventTypeKey};
 use crate::{
     context_bootstrap::{
         CHILD_BROWSING_CONTEXT_HANDLE_SLOT, EventHandlerType,
@@ -13,7 +14,7 @@ use crate::{
     v8_execution_watchdog::V8ExecutionWatchdog,
 };
 use moli_webapi::events::subclasses::error::construct_original_error_event;
-use moli_webapi::events::{construct_native_event, init::EventInit};
+use moli_webapi::events::{construct_native_event_with_type, init::EventInit};
 use std::collections::HashSet;
 
 struct EventListenerEntry {
@@ -109,10 +110,11 @@ impl UncompiledEventHandler {
     pub(crate) fn from_attribute(
         dom_host: &crate::dom::native::DomHost,
         owner: DomHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> Option<Self> {
-        let name =
-            crate::native_bridge::element::event_handler_content_attribute_name(Some(event_type)?)?;
+        let name = crate::native_bridge::element::event_handler_content_attribute_name(
+            event_type.as_str()?,
+        )?;
         let source = dom_host
             .dom()
             .get_attribute_dom_string_value(owner, &name)?;
@@ -245,9 +247,9 @@ impl EventDispatchEntry {
 pub(crate) fn event_handler_content_attribute(
     runtime: &DocumentRuntime,
     target: EventTargetHandle,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
 ) -> Option<UncompiledEventHandler> {
-    let event_type = Some(event_type)?;
+    let event_type = event_type.as_str()?;
     let attribute_name =
         crate::native_bridge::element::event_handler_content_attribute_name(event_type)?;
     let handle = match target {
@@ -286,9 +288,10 @@ pub(crate) fn event_handler_content_attribute(
 }
 
 pub(crate) struct HostEventTargetRegistry {
-    listeners: HashMap<EventTargetHandle, HashMap<String, Vec<EventListenerEntry>>>,
-    handler_properties: HashMap<EventTargetHandle, HashMap<String, EventHandlerPropertyEntry>>,
-    event_type_registration_ids: HashMap<EventTargetHandle, HashMap<String, u64>>,
+    listeners: HashMap<EventTargetHandle, indexmap::IndexMap<EventType, Vec<EventListenerEntry>>>,
+    handler_properties:
+        HashMap<EventTargetHandle, indexmap::IndexMap<EventType, EventHandlerPropertyEntry>>,
+    event_type_registration_ids: HashMap<EventTargetHandle, indexmap::IndexMap<EventType, u64>>,
     next_listener_id: u64,
 }
 
@@ -326,7 +329,7 @@ pub(crate) fn invoke_prepared_event_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host_ptr: *mut PageScriptHost,
     invocation_target_in_shadow_tree: bool,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     callback_name: &str,
     callback: crate::native_bridge::PreparedEventCallback,
     target: EventTargetHandle,
@@ -410,7 +413,7 @@ pub(crate) fn invoke_prepared_event_callback<'s>(
 fn invoke_prepared_event_callback_with_receiver<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host_ptr: *mut PageScriptHost,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     callback_name: &str,
     callback: crate::native_bridge::PreparedEventCallback,
     receiver: v8::Local<'s, v8::Value>,
@@ -465,7 +468,7 @@ pub(crate) fn invoke_prepared_before_unload_event_handler<'s>(
     host_ptr: *mut PageScriptHost,
     target: EventTargetHandle,
     invocation_target_in_shadow_tree: bool,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     callback_name: &str,
     callback: crate::native_bridge::PreparedEventCallback,
     event: v8::Local<'s, v8::Object>,
@@ -557,8 +560,8 @@ fn invoke_event_handler_property<'s>(
     host_ptr: *mut PageScriptHost,
     target: EventTargetHandle,
     invocation_target_in_shadow_tree: bool,
-    event_type: &str,
     _target_object: v8::Local<'s, v8::Object>,
+    event_type: &(impl EventTypeKey + ?Sized),
     event: v8::Local<'s, v8::Object>,
 ) {
     if V8ExecutionWatchdog::callback_dispatch_has_timed_out(scope) {
@@ -569,7 +572,7 @@ fn invoke_event_handler_property<'s>(
             Some(EventHandlerPropertyValue::Callback(callback_id)) => callback_id,
             Some(EventHandlerPropertyValue::Null) => return,
             None => {
-                let Some(event_type_str) = Some(event_type) else {
+                let Some(event_type_str) = event_type.as_str() else {
                     return;
                 };
                 let compiled = match target {
@@ -614,7 +617,7 @@ fn call_event_target_listeners_filtered<'s>(
     host_ptr: *mut PageScriptHost,
     target: EventTargetHandle,
     invocation_target_in_shadow_tree: bool,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     event: v8::Local<'s, v8::Object>,
     capture_only: bool,
     at_target: bool,
@@ -677,7 +680,7 @@ fn event_target_is_current(host_ptr: *mut PageScriptHost, target: EventTargetHan
 pub(crate) fn report_event_listener_exception<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host_ptr: *mut PageScriptHost,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     handler: v8::Local<'s, v8::Function>,
     report: &V8ExceptionReport,
 ) {
@@ -698,7 +701,7 @@ pub(crate) fn report_event_listener_exception<'s>(
 pub(crate) fn report_event_callback_exception<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host_ptr: *mut PageScriptHost,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     relevant_identity: Option<crate::native_bridge::WindowExecutionContextIdentity>,
     child_handle: Option<DomHandle>,
     report: &V8ExceptionReport,
@@ -729,7 +732,7 @@ pub(crate) fn report_event_callback_exception<'s>(
                 return;
             };
             Some(reporting_scope)
-        } else if event_type == "error" {
+        } else if event_type.is_type("error") {
             return;
         } else {
             None
@@ -886,7 +889,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn set_event_handler_property(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         callback_id: Option<crate::native_bridge::EventCallbackId>,
     ) -> Option<crate::native_bridge::EventCallbackId> {
         let existing_listener_id = self
@@ -903,7 +906,7 @@ impl HostEventTargetRegistry {
             .map(EventHandlerPropertyState::Callback)
             .unwrap_or(EventHandlerPropertyState::Null);
         let previous = self.handler_properties.entry(target).or_default().insert(
-            event_type.to_owned(),
+            event_type.to_event_type(),
             EventHandlerPropertyEntry { listener_id, state },
         );
         let previous_callback = previous.and_then(event_handler_callback_id);
@@ -916,7 +919,7 @@ impl HostEventTargetRegistry {
     fn event_handler_property_value(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> Option<EventHandlerPropertyValue> {
         match &self
             .handler_properties
@@ -935,7 +938,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn event_handler_property_callback_id(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> Option<Option<crate::native_bridge::EventCallbackId>> {
         match &self
             .handler_properties
@@ -952,7 +955,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn listener_callback_ids(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         capture: bool,
     ) -> Vec<crate::native_bridge::EventCallbackId> {
         self.listeners
@@ -981,7 +984,7 @@ impl HostEventTargetRegistry {
                         event_type_registration_id,
                         EventListenerInspectorSnapshot {
                             registration_id: entry.id,
-                            event_type: event_type.clone(),
+                            event_type: event_type.as_str_lossy().to_owned(),
                             callback_id: entry.callback_id,
                             capture: entry.capture,
                             once: entry.once,
@@ -1004,7 +1007,7 @@ impl HostEventTargetRegistry {
                         .unwrap_or(registration_id),
                     EventListenerInspectorSnapshot {
                         registration_id,
-                        event_type: event_type.clone(),
+                        event_type: event_type.as_str_lossy().to_owned(),
                         callback_id,
                         capture: false,
                         once: false,
@@ -1025,7 +1028,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn insert_listener(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         registration: EventListenerRegistration,
     ) {
         let id = self.allocate_listener_id();
@@ -1034,14 +1037,14 @@ impl HostEventTargetRegistry {
             .listeners
             .entry(target)
             .or_default()
-            .entry(event_type.to_owned())
+            .entry(event_type.to_event_type())
             .or_default();
         if moli_trace::cdp_nav_timing_enabled() {
             tracing::info!(
                 target: "moli_cdp_nav_timing",
                 stage = "event_listener_registered",
                 id,
-                event_type,
+                event_type = %event_type,
                 ?target,
                 capture = registration.capture,
                 passive = registration.passive,
@@ -1070,7 +1073,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn remove_listener_by_id(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         callback_id: crate::native_bridge::EventCallbackId,
         capture: bool,
     ) -> bool {
@@ -1084,7 +1087,7 @@ impl HostEventTargetRegistry {
         entries.retain(|entry| entry.callback_id != callback_id || entry.capture != capture);
         let removed = entries.len() != before;
         if entries.is_empty() {
-            target_listeners.remove(event_type);
+            target_listeners.shift_remove(event_type);
         }
         if target_listeners.is_empty() {
             self.listeners.remove(&target);
@@ -1122,7 +1125,11 @@ impl HostEventTargetRegistry {
         self.retain_active_event_type_registration_ids();
     }
 
-    pub(crate) fn has_listener(&self, target: EventTargetHandle, event_type: &str) -> bool {
+    pub(crate) fn has_listener(
+        &self,
+        target: EventTargetHandle,
+        event_type: &(impl EventTypeKey + ?Sized),
+    ) -> bool {
         self.handler_properties
             .get(&target)
             .and_then(|handlers| handlers.get(event_type))
@@ -1137,7 +1144,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn has_listener_in_dispatch_path(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         include_bubbling: bool,
     ) -> bool {
         self.listeners
@@ -1162,13 +1169,13 @@ impl HostEventTargetRegistry {
     fn ensure_event_type_registration_id(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         registration_id: u64,
     ) {
         self.event_type_registration_ids
             .entry(target)
             .or_default()
-            .entry(event_type.to_owned())
+            .entry(event_type.to_event_type())
             .or_insert(registration_id);
     }
 
@@ -1176,7 +1183,7 @@ impl HostEventTargetRegistry {
     fn event_type_registration_id(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> Option<u64> {
         self.event_type_registration_ids
             .get(&target)
@@ -1187,7 +1194,7 @@ impl HostEventTargetRegistry {
     fn event_type_has_live_registration(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> bool {
         self.listeners
             .get(&target)
@@ -1203,7 +1210,7 @@ impl HostEventTargetRegistry {
     fn remove_event_type_registration_id_if_unused(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) {
         if self.event_type_has_live_registration(target, event_type) {
             return;
@@ -1211,7 +1218,7 @@ impl HostEventTargetRegistry {
         let Some(event_types) = self.event_type_registration_ids.get_mut(&target) else {
             return;
         };
-        event_types.remove(event_type);
+        event_types.shift_remove(event_type);
         if event_types.is_empty() {
             self.event_type_registration_ids.remove(&target);
         }
@@ -1242,7 +1249,7 @@ impl HostEventTargetRegistry {
         host_ptr: *mut PageScriptHost,
         target: EventTargetHandle,
         invocation_target_in_shadow_tree: bool,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         event: v8::Local<'s, v8::Object>,
         filter: ListenerFilter,
         at_target: bool,
@@ -1304,7 +1311,7 @@ impl HostEventTargetRegistry {
             tracing::info!(
                 target: "moli_cdp_nav_timing",
                 stage = "event_listener_batch_start",
-                event_type,
+                event_type = %event_type,
                 ?target,
                 ?filter,
                 at_target,
@@ -1523,7 +1530,7 @@ fn dispatch_public_event_with_original_target_impl<'s, 'i>(
     let event_type = normalize_public_event_record(scope, event, target_object.into())?;
     // Keyboard input belongs to its dispatch document even if a listener adopts
     // the target into another document before the default action runs.
-    let keyboard_dispatch_document = if event_type == "keydown" {
+    let keyboard_dispatch_document = if event_type.is_type("keydown") {
         let host = unsafe { &*host_ptr };
         match dispatch_target {
             EventTargetHandle::Node(handle) => host.dom_host().owner_document_handle(handle),
@@ -1890,7 +1897,7 @@ fn dispatch_public_event_with_original_target_impl<'s, 'i>(
         post_dispatch_related_target,
     )?;
     set_event_post_dispatch_source(scope, host_ptr, event, post_dispatch_source_target)?;
-    if event_type == "mouseover"
+    if event_type.is_type("mouseover")
         && !event_default_prevented(scope, event)
         && let EventTargetHandle::Node(handle) = dispatch_target
     {
@@ -1898,7 +1905,7 @@ fn dispatch_public_event_with_original_target_impl<'s, 'i>(
             scope, host_ptr, handle,
         );
     }
-    if event_type == "keydown"
+    if event_type.is_type("keydown")
         && event_bool_property(scope, event, "isTrusted")
         && !event_default_prevented(scope, event)
     {
@@ -1925,9 +1932,10 @@ fn stops_submit_or_reset_at_ancestor_form(
     host_ptr: *mut PageScriptHost,
     original_target: EventTargetHandle,
     current_target: EventTargetHandle,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
 ) -> bool {
-    if !matches!(event_type, "submit" | "reset") || current_target == original_target {
+    if !matches!(event_type.as_str(), Some("submit" | "reset")) || current_target == original_target
+    {
         return false;
     }
     let EventTargetHandle::Node(handle) = current_target else {
@@ -1944,7 +1952,7 @@ pub(crate) fn dispatch_host_event(
     host_ptr: *mut PageScriptHost,
     dispatch_target: EventTargetHandle,
     event_target: EventTargetHandle,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     bubbles: bool,
     cancelable: bool,
 ) -> std::result::Result<(), String> {
@@ -1986,7 +1994,7 @@ fn run_host_event_dispatch<'s>(
     host_ptr: *mut PageScriptHost,
     dispatch_target: EventTargetHandle,
     invocation_target_in_shadow_tree: bool,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     event: v8::Local<'s, v8::Object>,
 ) -> std::result::Result<(), String> {
     if dispatch_target == EventTargetHandle::Window {
@@ -2098,8 +2106,8 @@ pub(crate) fn event_dispatch_status<'s>(
 }
 
 /// Per-spec `(bubbles, cancelable)` defaults for host-dispatched events.
-pub(crate) fn host_event_defaults(event_type: &str) -> (bool, bool) {
-    match Some(event_type) {
+pub(crate) fn host_event_defaults(event_type: &(impl EventTypeKey + ?Sized)) -> (bool, bool) {
+    match event_type.as_str() {
         // Events that bubble per spec
         Some("DOMContentLoaded") => (true, false),
         Some("readystatechange") => (false, false),
@@ -2114,7 +2122,7 @@ pub(crate) fn host_event_defaults(event_type: &str) -> (bool, bool) {
 
 pub(crate) fn create_host_event<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     current_target: v8::Local<'s, v8::Value>,
     target: v8::Local<'s, v8::Value>,
     bubbles: bool,
@@ -2133,13 +2141,16 @@ pub(crate) fn create_host_event<'s>(
 
 fn construct_event_instance<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     bubbles: bool,
     cancelable: bool,
 ) -> std::result::Result<v8::Local<'s, v8::Object>, String> {
     let try_catch = std::pin::pin!(v8::TryCatch::new(scope));
     let mut scope = try_catch.init();
-    construct_native_event(
+    let event_type = event_type
+        .to_v8(&scope)
+        .ok_or_else(|| "failed to allocate a host Event type".to_owned())?;
+    construct_native_event_with_type(
         &mut scope,
         event_type,
         EventInit {
@@ -2155,7 +2166,7 @@ fn normalize_public_event_record<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     event: v8::Local<'s, v8::Object>,
     default_target: v8::Local<'s, v8::Value>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<EventType, String> {
     let type_key = v8str(scope, "type");
     let target_key = v8str(scope, "target");
     let current_target_key = v8str(scope, "currentTarget");
@@ -2168,7 +2179,7 @@ fn normalize_public_event_record<'s>(
     }
     let event_type = event_type_value
         .to_string(scope)
-        .map(|value| value.to_rust_string_lossy(scope))
+        .map(|value| EventType::from_v8(scope, value))
         .unwrap_or_default();
 
     let target_value =
@@ -2679,7 +2690,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn set_compiled_event_handler_property(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         callback_id: Option<crate::native_bridge::EventCallbackId>,
     ) -> Option<crate::native_bridge::EventCallbackId> {
         let listener_id = self
@@ -2693,7 +2704,7 @@ impl HostEventTargetRegistry {
             .map(EventHandlerPropertyState::Callback)
             .unwrap_or(EventHandlerPropertyState::Null);
         let previous = self.handler_properties.entry(target).or_default().insert(
-            event_type.to_owned(),
+            event_type.to_event_type(),
             EventHandlerPropertyEntry {
                 listener_id: Some(listener_id),
                 state,
@@ -2705,18 +2716,18 @@ impl HostEventTargetRegistry {
     pub(crate) fn set_event_handler_content_attribute(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         handler: Option<UncompiledEventHandler>,
     ) -> Option<crate::native_bridge::EventCallbackId> {
         let Some(handler) = handler else {
             let removed = self
                 .handler_properties
                 .get_mut(&target)
-                .and_then(|handlers| handlers.remove(event_type));
+                .and_then(|handlers| handlers.shift_remove(event_type));
             let remove_target = self
                 .handler_properties
                 .get(&target)
-                .is_some_and(HashMap::is_empty);
+                .is_some_and(indexmap::IndexMap::is_empty);
             if remove_target {
                 self.handler_properties.remove(&target);
             }
@@ -2732,7 +2743,7 @@ impl HostEventTargetRegistry {
             .unwrap_or_else(|| self.allocate_listener_id());
         self.ensure_event_type_registration_id(target, event_type, listener_id);
         let previous = self.handler_properties.entry(target).or_default().insert(
-            event_type.to_owned(),
+            event_type.to_event_type(),
             EventHandlerPropertyEntry {
                 listener_id: Some(listener_id),
                 state: EventHandlerPropertyState::Uncompiled(handler),
@@ -2744,7 +2755,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn has_event_handler_property_entry(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> bool {
         self.handler_properties
             .get(&target)
@@ -2754,7 +2765,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn ensure_event_handler_content_attribute(
         &mut self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
         handler: Option<UncompiledEventHandler>,
     ) {
         if let Some(handler) = handler
@@ -2771,7 +2782,7 @@ impl HostEventTargetRegistry {
     pub(crate) fn uncompiled_event_handler_content_attribute(
         &self,
         target: EventTargetHandle,
-        event_type: &str,
+        event_type: &(impl EventTypeKey + ?Sized),
     ) -> Option<UncompiledEventHandler> {
         match &self
             .handler_properties
@@ -2791,7 +2802,7 @@ fn invoke_registered_event_handler<'s>(
     host_ptr: *mut PageScriptHost,
     target: EventTargetHandle,
     invocation_target_in_shadow_tree: bool,
-    event_type: &str,
+    event_type: &(impl EventTypeKey + ?Sized),
     event: v8::Local<'s, v8::Object>,
     callback_id: crate::native_bridge::EventCallbackId,
 ) {
@@ -2802,7 +2813,7 @@ fn invoke_registered_event_handler<'s>(
 
     let timing_started = moli_trace::cdp_nav_timing_enabled().then(Instant::now);
     if target == EventTargetHandle::Window
-        && (event_type == "error")
+        && event_type.is_type("error")
         && let Some(arguments) = error_event_handler_arguments(scope, event)
     {
         let returned = invoke_prepared_event_callback(
@@ -2838,7 +2849,7 @@ fn invoke_registered_event_handler<'s>(
         return;
     }
 
-    if (event_type == "beforeunload") {
+    if event_type.is_type("beforeunload") {
         invoke_prepared_before_unload_event_handler(
             scope,
             host_ptr,
