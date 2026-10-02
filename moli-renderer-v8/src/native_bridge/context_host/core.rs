@@ -1758,7 +1758,7 @@ impl PageScriptHost {
     pub(crate) fn mark_text_control_change_pending(
         &mut self,
         handle: DomHandle,
-        committed_value: &str,
+        committed_value: &moli_dom::native::DomStringValue,
     ) {
         if self
             .pending_text_control_change_commit
@@ -1773,7 +1773,10 @@ impl PageScriptHost {
         });
     }
 
-    pub(crate) fn take_text_control_change_commit(&mut self, handle: DomHandle) -> Option<String> {
+    pub(crate) fn take_text_control_change_commit(
+        &mut self,
+        handle: DomHandle,
+    ) -> Option<moli_dom::native::DomStringValue> {
         if self
             .pending_text_control_change_commit
             .as_ref()
