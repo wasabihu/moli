@@ -1813,19 +1813,35 @@ struct SvgMarkerElementPrototypeAccessorsDeclaration {
     orient: (),
 }
 
-#[derive(WebApiFunctionTemplate)]
-#[webapi(name = "SVGURIReference", enumerable)]
-struct SvgUriReferencePrototypeAccessorsDeclaration {
-    #[webapi(accessor_property = "href", getter = svg_uri_href_getter)]
-    href: (),
+macro_rules! define_svg_uri_reference_accessors {
+    ($declaration:ident, $interface:ident) => {
+        #[derive(WebApiFunctionTemplate)]
+        #[webapi(interface = web_api_interfaces::$interface, enumerable)]
+        struct $declaration {
+            #[webapi(accessor_property = "href", getter = svg_uri_href_getter)]
+            href: (),
+        }
+    };
 }
 
-#[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGMPathElement, enumerable)]
-struct SvgMPathElementPrototypeAccessorsDeclaration {
-    #[webapi(accessor_property = "href", getter = svg_mpath_href_getter)]
-    href: (),
-}
+define_svg_uri_reference_accessors!(SvgAUriReferenceAccessorsDeclaration, SVGAElement);
+define_svg_uri_reference_accessors!(SvgImageUriReferenceAccessorsDeclaration, SVGImageElement);
+define_svg_uri_reference_accessors!(SvgUseUriReferenceAccessorsDeclaration, SVGUseElement);
+define_svg_uri_reference_accessors!(
+    SvgTextPathUriReferenceAccessorsDeclaration,
+    SVGTextPathElement
+);
+define_svg_uri_reference_accessors!(
+    SvgPatternUriReferenceAccessorsDeclaration,
+    SVGPatternElement
+);
+define_svg_uri_reference_accessors!(SvgScriptUriReferenceAccessorsDeclaration, SVGScriptElement);
+define_svg_uri_reference_accessors!(
+    SvgGradientUriReferenceAccessorsDeclaration,
+    SVGGradientElement
+);
+define_svg_uri_reference_accessors!(SvgFilterUriReferenceAccessorsDeclaration, SVGFilterElement);
+define_svg_uri_reference_accessors!(SvgMPathUriReferenceAccessorsDeclaration, SVGMPathElement);
 
 pub(super) fn install_svg_length_bindings<'s>(
     scope: &mut v8::PinScope<'s, '_, ()>,
@@ -2187,6 +2203,9 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
             SvgFilterElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
+            SvgFilterUriReferenceAccessorsDeclaration::initialize_prototype_template(
+                scope, prototype,
+            );
         }
         "SVGComponentTransferFunctionElement" => {
             SvgComponentTransferFunctionElementPrototypeAccessorsDeclaration::initialize_prototype_template(
@@ -2242,7 +2261,7 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
             SvgTextPathElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
+            SvgTextPathUriReferenceAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
         }
@@ -2250,7 +2269,7 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
             SvgPatternElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
+            SvgPatternUriReferenceAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
         }
@@ -2258,20 +2277,17 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
             SvgGradientElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
+            SvgGradientUriReferenceAccessorsDeclaration::initialize_prototype_template(
+                scope, prototype,
+            );
         }
         "SVGLinearGradientElement" => {
             SvgLinearGradientElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
-                scope, prototype,
-            );
         }
         "SVGRadialGradientElement" => {
             SvgRadialGradientElementPrototypeAccessorsDeclaration::initialize_prototype_template(
-                scope, prototype,
-            );
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
         }
@@ -2310,13 +2326,16 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
                 scope, prototype,
             );
         }
-        "SVGAElement" | "SVGScriptElement" => {
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
+        "SVGAElement" => {
+            SvgAUriReferenceAccessorsDeclaration::initialize_prototype_template(scope, prototype);
+        }
+        "SVGScriptElement" => {
+            SvgScriptUriReferenceAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
         }
         "SVGMPathElement" => {
-            SvgMPathElementPrototypeAccessorsDeclaration::initialize_prototype_template(
+            SvgMPathUriReferenceAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
         }
@@ -2324,7 +2343,7 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
             SvgImageElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
+            SvgImageUriReferenceAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
             SvgImagePreserveAspectRatioPrototypeAccessorsDeclaration::initialize_prototype_template(
@@ -2335,9 +2354,7 @@ pub(super) fn install_svg_element_accessor_bindings<'s>(
             SvgUseElementPrototypeAccessorsDeclaration::initialize_prototype_template(
                 scope, prototype,
             );
-            SvgUriReferencePrototypeAccessorsDeclaration::initialize_prototype_template(
-                scope, prototype,
-            );
+            SvgUseUriReferenceAccessorsDeclaration::initialize_prototype_template(scope, prototype);
         }
         "SVGForeignObjectElement" => {
             SvgForeignObjectElementPrototypeAccessorsDeclaration::initialize_prototype_template(
