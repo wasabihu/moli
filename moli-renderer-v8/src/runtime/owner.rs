@@ -1119,6 +1119,7 @@ fn page_turn_trigger_log_label(trigger: PageTurnTrigger) -> &'static str {
             "intersection-observer-task-wake"
         }
         Some(RendererOwnerWakeSource::FontLoadingTask) => "font-loading-task-wake",
+        Some(RendererOwnerWakeSource::DeviceSensorTask) => "device-sensor-task-wake",
         Some(RendererOwnerWakeSource::CanvasBlobSerializationTask) => {
             "canvas-blob-serialization-task-wake"
         }
