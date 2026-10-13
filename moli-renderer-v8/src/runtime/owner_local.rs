@@ -289,6 +289,29 @@ enum RendererPageCommandPendingDispatch {
     ),
 }
 
+#[cfg(all(test, feature = "devtools"))]
+#[doc(hidden)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RendererLayoutWorkingSetObservation {
+    pub(crate) vm_creation_id: u64,
+    pub(crate) document: crate::document_runtime::DomHandle,
+    pub(crate) working_sets: usize,
+    pub(crate) builds: u64,
+    pub(crate) screen: (
+        u64,
+        u64,
+        u64,
+        Option<(
+            crate::document_runtime::DomHandle,
+            moli_layout::LayoutTreeRetentionMetrics,
+        )>,
+    ),
+    pub(crate) inputs: Option<String>,
+    pub(crate) frame: Option<String>,
+    pub(crate) frame_idle: bool,
+    pub(crate) maintenance_deadline: Option<std::time::Instant>,
+}
+
 #[cfg(test)]
 #[derive(Debug)]
 #[doc(hidden)]
@@ -1283,6 +1306,25 @@ impl RendererPageTestingHandle {
             RendererOwnerReply::TestingHostUniqueDocumentIsolateCount(count) => Ok(count),
             other => Err(anyhow!(
                 "renderer owner returned non-host-unique-document-isolate-count testing reply: {:?}",
+                std::mem::discriminant(&other)
+            )),
+        }
+    }
+
+    #[cfg(all(test, feature = "devtools"))]
+    pub(crate) async fn layout_working_set_observation_async(
+        &self,
+    ) -> Result<RendererLayoutWorkingSetObservation> {
+        match self
+            .render_runtime
+            .dispatch(RendererOwnerCommand::TestingLayoutWorkingSetObservation {
+                token: self.token,
+            })
+            .await?
+        {
+            RendererOwnerReply::TestingLayoutWorkingSetObservation(snapshot) => Ok(*snapshot),
+            other => Err(anyhow!(
+                "renderer owner returned non-layout-working-set-observation testing reply: {:?}",
                 std::mem::discriminant(&other)
             )),
         }

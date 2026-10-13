@@ -166,6 +166,28 @@ impl PageScriptHost {
         self.refresh_realtime_rendering_opportunity();
     }
 
+    #[cfg(all(test, feature = "devtools"))]
+    pub(crate) fn realtime_frame_snapshot_for_test(&self) -> Option<String> {
+        let state = self.realtime_layout_state.as_ref()?;
+        let frame = state.frame.borrow();
+        Some(format!(
+            "{:?}",
+            (
+                frame.next_id,
+                frame.scheduled(),
+                frame.last_deadline,
+                frame.running().map(|running| {
+                    (
+                        &running.ticket,
+                        &running.documents,
+                        running.sample_all_intersections,
+                    )
+                }),
+                frame.source_requested,
+            ),
+        ))
+    }
+
     #[cfg(test)]
     pub(crate) fn set_realtime_opportunity_clock_for_test(&self, now: Instant) {
         self.realtime_layout_state

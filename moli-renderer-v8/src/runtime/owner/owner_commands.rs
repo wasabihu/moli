@@ -881,6 +881,15 @@ impl RendererOwnerHandle {
                     .map(RendererOwnerReply::TestingHostUniqueDocumentIsolateCount)
                     .into()
             }
+            #[cfg(all(test, feature = "devtools"))]
+            RendererOwnerCommand::TestingLayoutWorkingSetObservation { token } => {
+                owner_local_store_session(owner_local_store)
+                    .layout_working_set_observation_for_testing(token)
+                    .map(Box::new)
+                    .map(RendererOwnerReply::TestingLayoutWorkingSetObservation)
+                    .into()
+            }
+
             #[cfg(test)]
             RendererOwnerCommand::TestingRealtimeLayoutObservation { token } => {
                 owner_local_store_session(owner_local_store)

@@ -14,11 +14,12 @@ use super::owner_local_store::{
     RendererOwnerLocalContext, RendererOwnerLocalStore, RendererPageCommandDispatch,
     RendererPageCreationResolution, RendererPageScheduledTurn, RendererPageToken,
     RendererPageTurnAdmission, RendererPageTurnCheckoutError, RendererPendingPageCreation,
-    RendererPreparedDocumentResidence, RetiringPageEntry,
+    RendererPreparedDocumentResidence, RendererPrintCaptureCommandDispatch, RetiringPageEntry,
     advance_document_lifecycle_one_page_turn_via_local_task,
     advance_dom_stable_wait_turn_on_entry_via_local_task,
     advance_idle_wait_turn_on_entry_via_local_task, advance_page_owner_one_turn_via_local_task,
     advance_pending_phase_one_navigation_on_entry_via_local_task,
+    advance_print_capture_on_entry_via_local_task,
     advance_runtime_command_lifecycle_on_entry_via_local_task,
     advance_runtime_expression_await_turn_on_entry_via_local_task,
     advance_script_truthy_wait_turn_on_entry_via_local_task,
@@ -299,6 +300,11 @@ pub enum RendererOwnerCommand {
     TestingHostUniqueDocumentIsolateCount {
         token: RendererPageToken,
     },
+    #[cfg(all(test, feature = "devtools"))]
+    TestingLayoutWorkingSetObservation {
+        token: RendererPageToken,
+    },
+
     #[cfg(test)]
     TestingRealtimeLayoutObservation {
         token: RendererPageToken,
@@ -333,6 +339,11 @@ pub enum RendererOwnerReply {
     TestingOwnerSlot(RendererPageSlotHandle),
     TestingHostInstanceKey(usize),
     TestingHostUniqueDocumentIsolateCount(usize),
+    #[cfg(all(test, feature = "devtools"))]
+    TestingLayoutWorkingSetObservation(
+        Box<super::owner_local::RendererLayoutWorkingSetObservation>,
+    ),
+
     #[cfg(test)]
     TestingRealtimeLayoutObservation(Box<super::owner_local::RendererRealtimeLayoutObservation>),
     #[cfg(test)]
@@ -741,6 +752,11 @@ enum RenderRuntimeTurn {
         command: RendererPageCommand,
         capture_policy: super::RendererPageStateCapturePolicy,
     },
+    ContinueLivePagePrintCapture {
+        token: RendererPageToken,
+        job: Box<crate::capture_resources::PrintCaptureJob>,
+        capture_policy: super::RendererPageStateCapturePolicy,
+    },
     ContinueLivePageRuntimeCommandLifecycle {
         token: RendererPageToken,
         scope_id: PageVmRuntimeCommandOutputScopeId,
@@ -848,6 +864,7 @@ impl RenderRuntimeTurn {
             Self::RunDevToolsMainCommand { token, .. } => Some(*token),
             Self::RunLivePageCommand { token, .. }
             | Self::ContinueLivePageRuntimeCommandLifecycle { token, .. }
+            | Self::ContinueLivePagePrintCapture { token, .. }
             | Self::WaitLivePageIdle { token, .. }
             | Self::WaitLivePageDomStable { token, .. }
             | Self::WaitLivePageSelector { token, .. }
@@ -861,6 +878,7 @@ impl RenderRuntimeTurn {
 
     fn committed_page_view_deadline(&self) -> Option<Instant> {
         match self {
+            Self::ContinueLivePagePrintCapture { job, .. } => Some(job.deadline()),
             Self::WaitLivePageIdle { deadline, .. }
             | Self::WaitLivePageDomStable { deadline, .. }
             | Self::WaitLivePageSelector { deadline, .. }
