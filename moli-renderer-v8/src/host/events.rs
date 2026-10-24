@@ -32,7 +32,7 @@ struct EventListenerEntry {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum ListenerFilter {
+pub(crate) enum ListenerFilter {
     Capturing,
     Bubbling,
     All,
