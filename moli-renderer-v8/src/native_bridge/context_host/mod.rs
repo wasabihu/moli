@@ -143,6 +143,7 @@ mod realtime_events;
 mod realtime_layout;
 mod realtime_rendering;
 mod webrtc_tasks;
+mod webtransport_tasks;
 pub(crate) use media_loads::PendingMediaLoadTerminalFollowup;
 pub(crate) use realtime_layout::LayoutPublicationRequest;
 mod text_track_loads;
@@ -1097,6 +1098,7 @@ pub(crate) struct PageScriptHost {
     media_element_events: media_element_events::MediaElementEventState,
     media_playback: media_playback::MediaPlaybackState,
     webrtc_tasks: webrtc_tasks::WebRtcTaskState,
+    webtransport_tasks: webtransport_tasks::WebTransportTaskState,
     element_toggle_events: element_toggle_events::ElementToggleEventState,
     form_navigations: form_navigations::FormNavigationState,
     text_track_default_modes: text_track_default_modes::TextTrackDefaultModeState,
