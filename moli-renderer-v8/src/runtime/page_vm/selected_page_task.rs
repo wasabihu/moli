@@ -415,6 +415,7 @@ impl PageVm {
                 deadline,
                 selection,
             } => {
+                let nesting_scope = self.vm().timer_nesting_scope_for_task();
                 let outcome = self.apply_selected_page_timer_turn(deadline, selection)?;
                 if let PageTimerTurnAction::Consumed {
                     root_document,
@@ -422,9 +423,10 @@ impl PageVm {
                     ..
                 } = outcome.action
                 {
-                    self.finish_popup_parser_producing_callback_task(
+                    self.finish_timer_callback_task(
                         root_document,
                         popup_parser_completions,
+                        nesting_scope,
                         loader,
                     )
                     .await?;
