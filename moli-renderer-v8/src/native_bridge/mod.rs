@@ -10,11 +10,11 @@ mod current_input;
 #[cfg(feature = "devtools")]
 pub(crate) use context_host::MouseReleaseFollowUp;
 pub(crate) use context_host::{
-    ChildDocumentFetch, DecodedImageContent, DocumentDomainState, LayoutPublicationRequest,
-    NavigationImageDocumentCompletion, NavigationImageDocumentLoad, PageScriptHost,
-    PageScriptHostTaskCapabilities, PendingScrollObservableEffects, PostParseAutofocusAdmission,
-    ServiceWorkerWindowOwner, SharedResourceTimingBufferRegistry, WindowAccessOrigin,
-    WindowOriginKey,
+    ChildDocumentFetch, DecodedImageContent, DocumentDomainState, InputImageRequestId,
+    LayoutPublicationRequest, NavigationImageDocumentCompletion, NavigationImageDocumentLoad,
+    PageScriptHost, PageScriptHostTaskCapabilities, PendingScrollObservableEffects,
+    PostParseAutofocusAdmission, ServiceWorkerWindowOwner, SharedResourceTimingBufferRegistry,
+    WindowAccessOrigin, WindowOriginKey,
 };
 #[cfg(feature = "devtools")]
 pub(crate) use current_input::CurrentInputEventScope;
