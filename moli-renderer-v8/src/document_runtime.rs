@@ -455,6 +455,7 @@ pub(crate) struct ConnectedLoadNetworkResult {
     /// Original request source, independent of later stylesheet installation
     /// authority and of the common stylesheet resource destination.
     pub(crate) resource_timing_initiator_type: &'static str,
+    pub(crate) render_blocking: bool,
     pub(crate) import_options: Option<crate::stylesheet_blocking::StylesheetFetchOptions>,
     pub(crate) consumed_preload_error: bool,
     /// Exact request Document, independent of an element's current location.
@@ -2733,6 +2734,7 @@ mod tests {
             .ready_connected_load_network_results
             .push_back(ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "link",
                 import_options: None,
@@ -2788,6 +2790,7 @@ mod tests {
             .ready_connected_load_network_results
             .push_back(ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "link",
                 import_options: None,
@@ -2847,6 +2850,7 @@ mod tests {
             .ready_connected_load_network_results
             .push_back(ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "link",
                 import_options: None,
@@ -2906,6 +2910,7 @@ mod tests {
             .ready_connected_load_network_results
             .push_back(ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "link",
                 import_options: None,
@@ -3519,6 +3524,7 @@ mod tests {
             successful: false,
             network_results: vec![ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "link",
                 import_options: None,
@@ -3626,6 +3632,7 @@ mod tests {
                 successful: true,
                 network_results: vec![ConnectedLoadNetworkResult {
                     network_observed: false,
+                    render_blocking: false,
                     resource_timing: None,
                     resource_timing_initiator_type,
                     import_options: None,
@@ -3705,6 +3712,7 @@ mod tests {
             successful: true,
             network_results: vec![ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "css",
                 import_options: None,
@@ -3772,6 +3780,7 @@ mod tests {
             successful: true,
             network_results: vec![ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "css",
                 import_options: None,
@@ -3918,6 +3927,7 @@ mod tests {
             .ready_connected_load_network_results
             .push_back(ConnectedLoadNetworkResult {
                 network_observed: false,
+                render_blocking: false,
                 resource_timing: None,
                 resource_timing_initiator_type: "link",
                 import_options: None,
