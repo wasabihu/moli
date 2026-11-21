@@ -687,6 +687,7 @@ fn click_handle_internal(
             scope,
             runtime_ptr,
             handle,
+            handle,
             coordinates.client_x,
             coordinates.client_y,
             button,
@@ -747,6 +748,7 @@ fn click_handle_internal(
             scope,
             runtime_ptr,
             handle,
+            handle,
             coordinates.client_x,
             coordinates.client_y,
             button,
@@ -792,13 +794,14 @@ fn click_handle_internal(
         }
         let mut pending_file_chooser = None;
         let pending_download = default_action.and_then(|default_action| match default_action {
-            ClickActivationDefaultAction::Element(handle) => {
-                if is_disabled_form_control(unsafe { &*runtime_ptr }, handle) {
+            ClickActivationDefaultAction::Element(activation_target) => {
+                if is_disabled_form_control(unsafe { &*runtime_ptr }, activation_target) {
                     return None;
                 }
                 perform_click_default_action(
                     scope,
                     runtime_ptr,
+                    activation_target,
                     handle,
                     coordinates.client_x,
                     coordinates.client_y,
@@ -1081,6 +1084,7 @@ pub(crate) fn perform_click_default_action_for_dispatched_event(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut PageScriptHost,
     handle: DomHandle,
+    event_target: DomHandle,
     event: v8::Local<'_, v8::Object>,
 ) {
     let runtime = unsafe { &*runtime_ptr };
@@ -1101,6 +1105,7 @@ pub(crate) fn perform_click_default_action_for_dispatched_event(
         scope,
         runtime_ptr,
         handle,
+        event_target,
         x,
         y,
         button,
@@ -1261,6 +1266,7 @@ fn perform_click_default_action(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut PageScriptHost,
     handle: DomHandle,
+    event_target: DomHandle,
     x: f64,
     y: f64,
     button: i32,
@@ -1364,7 +1370,7 @@ fn perform_click_default_action(
         || is_button_input(runtime, handle)
         || is_valid_submit_button(runtime, handle)
         || is_valid_reset_button(runtime, handle))
-        && perform_popover_invoker_default_action(scope, runtime_ptr, handle)
+        && perform_popover_invoker_default_action(scope, runtime_ptr, handle, event_target)
     {
         return None;
     }
