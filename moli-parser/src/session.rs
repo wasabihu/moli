@@ -456,7 +456,7 @@ impl HtmlParserSession {
         self.tokenizer.sink.sink()
     }
 
-    pub(super) fn install_fragment_sanitizer(
+    pub(super) fn install_sanitizer(
         &mut self,
         config: Box<crate::HtmlSanitizer>,
         inert_document: NativeNodeId,
@@ -465,8 +465,7 @@ impl HtmlParserSession {
             .sink
             .inner
             .set_sanitization(DocumentSink::sanitization());
-        self.sink()
-            .install_fragment_sanitizer(config, inert_document);
+        self.sink().install_sanitizer(config, inert_document);
     }
 
     pub(super) fn finish(self) -> ParserStreamHtmlTreeSinkTarget {

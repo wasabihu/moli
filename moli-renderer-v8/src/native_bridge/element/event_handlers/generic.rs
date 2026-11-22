@@ -142,6 +142,10 @@ const ELEMENT_SPECIFIC_EVENT_HANDLER_PROPERTIES: &[&str] = &[
 pub(in crate::native_bridge::element) fn is_element_event_handler_content_attribute_name(
     name: &str,
 ) -> bool {
+    event_handler_content_attribute_names().any(|candidate| candidate == name)
+}
+
+pub(crate) fn event_handler_content_attribute_names() -> impl Iterator<Item = &'static str> {
     GENERIC_EVENT_HANDLER_PROPERTIES
         .iter()
         .chain(WINDOW_EVENT_HANDLER_PROPERTIES)
@@ -149,7 +153,6 @@ pub(in crate::native_bridge::element) fn is_element_event_handler_content_attrib
         .chain(ELEMENT_SPECIFIC_EVENT_HANDLER_PROPERTIES)
         .copied()
         .chain(["onmessageerror"])
-        .any(|candidate| candidate == name)
 }
 
 pub(crate) fn element_event_handler_content_attribute_applies(
