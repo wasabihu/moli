@@ -5070,17 +5070,21 @@ pub enum RendererPageCommand {
     SetBypassContentSecurityPolicy(bool),
     SetEmulatedMedia(crate::protocol_types::EmulatedMediaOverrides),
     SetViewportSurface(Option<crate::protocol_types::ViewportSurface>),
+    #[cfg(feature = "molio")]
     SubscribeViewportFrames(super::RendererViewportSubscription),
+    #[cfg(feature = "molio")]
     WakeViewportFrames,
+    #[cfg(feature = "molio")]
     NavigateViewport(Option<String>),
+    #[cfg(feature = "molio")]
     TraverseViewportHistory(i64),
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     ReadViewportEditor,
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     ReadViewportSelection(RendererDocumentLifecycleIdentity),
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     ApplyViewportEdit(super::RendererViewportEdit),
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     DropViewportFiles {
         document: RendererDocumentLifecycleIdentity,
         x: f64,
@@ -5335,9 +5339,9 @@ impl RendererRuntimeEvaluationResult {
 
 #[non_exhaustive]
 pub enum RendererPageReply {
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     ViewportEditor(Option<super::RendererViewportEditor>),
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     ViewportEdit(super::RendererViewportEditReply),
     #[cfg(feature = "devtools")]
     DevTools(RendererDevToolsPageReply),

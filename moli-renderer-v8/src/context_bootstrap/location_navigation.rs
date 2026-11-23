@@ -127,6 +127,7 @@ pub(crate) fn navigate_top_level_same_document_from_browser(
     true
 }
 
+#[cfg(feature = "molio")]
 pub(crate) fn navigate_top_level_from_browser(
     scope: &mut v8::PinScope<'_, '_>,
     target: Option<String>,

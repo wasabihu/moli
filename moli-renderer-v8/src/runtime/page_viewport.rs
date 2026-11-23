@@ -83,7 +83,6 @@ pub(super) struct ViewportFrameState {
     painted: Option<RendererVisualStateToken>,
     navigation: Option<RendererViewportNavigation>,
     sequence: u64,
-    #[cfg(feature = "devtools")]
     editing: crate::context_bootstrap::viewport_edit::ViewportEditing,
 }
 
@@ -91,16 +90,12 @@ impl ViewportFrameState {
     pub(super) fn discard_document(&mut self) {
         self.painted = None;
         self.navigation = None;
-        #[cfg(feature = "devtools")]
-        {
-            self.editing = Default::default();
-        }
+        self.editing = Default::default();
         self.subscription.updates.send_replace(None);
     }
 }
 
 impl PageVm {
-    #[cfg(feature = "devtools")]
     pub(super) fn read_viewport_selection(
         &mut self,
         document: RendererDocumentLifecycleIdentity,
@@ -113,7 +108,6 @@ impl PageVm {
         self.vm_mut().viewport_selected_text()
     }
 
-    #[cfg(feature = "devtools")]
     pub(super) fn drop_viewport_files(
         &mut self,
         document: RendererDocumentLifecycleIdentity,
@@ -150,7 +144,6 @@ impl PageVm {
         Ok(outcome.handled)
     }
 
-    #[cfg(feature = "devtools")]
     pub(super) fn read_viewport_editor(&mut self) -> Option<RendererViewportEditor> {
         if !self.document_settings.document_activity.focused {
             return None;
@@ -159,7 +152,6 @@ impl PageVm {
         self.vm.as_mut()?.viewport_editor_snapshot(editing)
     }
 
-    #[cfg(feature = "devtools")]
     pub(super) fn apply_viewport_edit(
         &mut self,
         edit: RendererViewportEdit,
@@ -195,7 +187,6 @@ impl PageVm {
             "Viewport frames require the Realtime layout policy"
         );
         self.set_viewport_surface(Some(subscription.surface))?;
-        #[cfg(feature = "devtools")]
         let editing = self
             .viewport_frames
             .as_mut()
@@ -206,7 +197,6 @@ impl PageVm {
             painted: None,
             navigation: None,
             sequence: 0,
-            #[cfg(feature = "devtools")]
             editing,
         }));
         Ok(())
@@ -272,10 +262,7 @@ impl PageVm {
             return;
         }
         let after = self.vm().visual_state_token(document, viewport, [255; 4]);
-        #[cfg(feature = "devtools")]
         let editor = self.read_viewport_editor();
-        #[cfg(not(feature = "devtools"))]
-        let editor = None;
         let state = self
             .viewport_frames
             .as_mut()

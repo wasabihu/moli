@@ -88,6 +88,7 @@ pub(in crate::runtime) struct LivePageEntry {
 pub(in crate::runtime) struct CommittedNavigationEntry {
     entry: LivePageEntry,
     navigation: Box<PageVmCommittedNavigationBootstrap>,
+    #[cfg(feature = "molio")]
     viewport_frames: Option<Box<crate::runtime::page_viewport::ViewportFrameState>>,
 }
 
@@ -110,6 +111,7 @@ impl CommittedNavigationEntry {
         Self {
             entry,
             navigation,
+            #[cfg(feature = "molio")]
             viewport_frames: None,
         }
     }
@@ -150,9 +152,12 @@ impl CommittedNavigationEntry {
                 .take()
                 .expect("committed navigation must retain its source PageVm until retirement")
         };
-        self.viewport_frames = page_vm.viewport_frames.take();
-        if let Some(frames) = self.viewport_frames.as_mut() {
-            frames.discard_document();
+        #[cfg(feature = "molio")]
+        {
+            self.viewport_frames = page_vm.viewport_frames.take();
+            if let Some(frames) = self.viewport_frames.as_mut() {
+                frames.discard_document();
+            }
         }
         #[cfg(test)]
         self.navigation
@@ -211,6 +216,7 @@ impl CommittedNavigationEntry {
                 "committed bootstrap finalization must reject outcomes without a replacement PageVm"
             ),
         };
+        #[cfg(feature = "molio")]
         if let Some(frames) = self.viewport_frames.take() {
             self.entry.page_vm_mut().restore_viewport_frames(frames);
         }

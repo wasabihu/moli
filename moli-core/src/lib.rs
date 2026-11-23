@@ -47,6 +47,7 @@ pub use moli_renderer_v8::{
     RendererNativeProtocolResponse, RendererNativeProtocolStateUpdate,
 };
 pub use moli_renderer_v8::{RendererPageAccessError, RendererPageCommand, RendererPageReply};
+#[cfg(feature = "molio")]
 pub use moli_renderer_v8::{
     RendererViewportEdit, RendererViewportEditAction, RendererViewportEditReply,
     RendererViewportEditor, RendererViewportFrame, RendererViewportNavigation,

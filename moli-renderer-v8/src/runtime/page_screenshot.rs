@@ -79,6 +79,7 @@ struct RendererVisualState {
 }
 
 impl RendererVisualStateToken {
+    #[cfg(feature = "devtools")]
     pub(crate) fn new(
         document: RendererDocumentLifecycleIdentity,
         dom_generation: u64,
@@ -104,6 +105,7 @@ impl RendererVisualStateToken {
         }))
     }
 
+    #[cfg(feature = "devtools")]
     fn has_same_resource_generation(&self, other: &Self) -> bool {
         self.0.resource_generation == other.0.resource_generation
     }
@@ -471,6 +473,7 @@ impl RendererImageCaptureOutcome {
     }
 }
 
+#[cfg(feature = "devtools")]
 pub(super) fn visual_state_for_rendered_frame(
     before: RendererVisualStateToken,
     after: RendererVisualStateToken,

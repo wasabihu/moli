@@ -108,6 +108,7 @@ impl PageVm {
                 Ok(())
             }
             RendererPageSchedulerTask::RenderingUpdate(task) => {
+                #[cfg(feature = "molio")]
                 let viewport_frame = task.kind()
                     == crate::page_task_queue::RendererPageRenderingUpdateTaskKind::FrameLifecycle;
                 let outcome = self.apply_selected_page_rendering_update_turn(task)?;
@@ -116,6 +117,7 @@ impl PageVm {
                     loader,
                 )
                 .await?;
+                #[cfg(feature = "molio")]
                 if viewport_frame {
                     self.publish_viewport_frame();
                 }

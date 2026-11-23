@@ -12,7 +12,7 @@ workspace = true
 anyhow = "1.0"
 gpui = { package = "gpui-ce", git = "https://github.com/lexmount/gpui-ce", rev = "1d433ddc675f9946ca91e0c705e4bc9b0360a78c" }
 gpui_platform = { package = "gpui_ce_platform", git = "https://github.com/lexmount/gpui-ce", rev = "1d433ddc675f9946ca91e0c705e4bc9b0360a78c", features = ["wayland", "x11"] }
-moli-core = { path = "../moli-core" }
+moli-core = { path = "../moli-core", features = ["molio"] }
 moli-web-mime = { path = "../moli-web-mime" }
 tokio = { version = "1.53.1", features = ["macros", "net", "rt", "sync", "time"] }
 unicode-segmentation = "1.12"

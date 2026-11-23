@@ -23,7 +23,7 @@ use moli_webapi_declare::{WebApiFunctionTemplate, WebApiTemplateValue};
 #[cfg(feature = "ace-protocol")]
 pub(crate) mod ace_page_task;
 mod activation;
-#[cfg(feature = "devtools")]
+#[cfg(feature = "molio")]
 pub(crate) use activation::replace_contenteditable_selection_after_beforeinput;
 mod anchors;
 mod animations;
@@ -447,14 +447,17 @@ pub(crate) use forms::{
     replace_text_control_selection_for_insert_html, text_control_value,
 };
 pub(crate) use forms::{form_control_is_effectively_disabled, input_files_for_object};
-#[cfg(feature = "devtools")]
+#[cfg(feature = "molio")]
 pub(crate) use forms::{
     is_text_control_user_editable, replace_text_control_selection_after_beforeinput,
-    text_control_set_selection_range_internal,
-    text_control_set_selection_range_with_direction_internal,
 };
 pub(in crate::native_bridge) use forms::{
     resize_select_options, select_add_insertion_point, select_options_resize_target,
+};
+#[cfg(feature = "devtools")]
+pub(crate) use forms::{
+    text_control_set_selection_range_internal,
+    text_control_set_selection_range_with_direction_internal,
 };
 use rendered_state::{node_check_visibility_callback, node_current_css_zoom_getter_function};
 

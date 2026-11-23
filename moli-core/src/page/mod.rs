@@ -27,7 +27,9 @@ mod same_document_navigation_support;
 mod settings_support;
 mod subresource_support;
 mod testing_support;
+#[cfg(feature = "molio")]
 mod viewport;
+#[cfg(feature = "molio")]
 mod viewport_buffer;
 mod wait_support;
 
@@ -48,7 +50,9 @@ pub use devtools::{
     decode_input_dispatch_outcome_completion, decode_insert_text_completion,
 };
 pub use moli_renderer_v8::RendererPageRequestPolicyUpdate;
+#[cfg(feature = "molio")]
 pub use viewport::ViewportFrames;
+#[cfg(feature = "molio")]
 pub use viewport_buffer::{
     BufferedViewportFrames, ViewportBuffers, ViewportFrameRef, ViewportOutput, ViewportState,
     ViewportUpdate,

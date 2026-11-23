@@ -15,7 +15,6 @@ pub struct ViewportFrames {
 }
 
 impl Page {
-    #[cfg(feature = "devtools")]
     pub async fn viewport_selected_text(
         &mut self,
         document: crate::RendererDocumentLifecycleIdentity,
@@ -29,7 +28,6 @@ impl Page {
         }
     }
 
-    #[cfg(feature = "devtools")]
     pub async fn drop_viewport_files(
         &mut self,
         document: crate::RendererDocumentLifecycleIdentity,
@@ -49,7 +47,6 @@ impl Page {
         Self::decode_bool_page_reply(reply, "drop viewport files")
     }
 
-    #[cfg(feature = "devtools")]
     pub async fn viewport_editor(&mut self) -> Result<Option<crate::RendererViewportEditor>> {
         match self
             .dispatch_page_command_async(RendererPageCommand::ReadViewportEditor)
@@ -60,7 +57,6 @@ impl Page {
         }
     }
 
-    #[cfg(feature = "devtools")]
     pub async fn edit_viewport(
         &mut self,
         edit: crate::RendererViewportEdit,

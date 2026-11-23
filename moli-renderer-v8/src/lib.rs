@@ -355,6 +355,7 @@ pub use runtime::{
     RendererElementClickError, RendererElementClickTarget, RendererPreparedPointerClick,
 };
 pub use runtime::{RendererPopupActivationParts, RendererRuntimeInspectorMessageResponseOrder};
+#[cfg(feature = "molio")]
 pub use runtime::{
     RendererViewportEdit, RendererViewportEditAction, RendererViewportEditReply,
     RendererViewportEditor, RendererViewportFrame, RendererViewportNavigation,

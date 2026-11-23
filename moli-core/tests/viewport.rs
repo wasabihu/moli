@@ -156,7 +156,6 @@ async fn viewport_paints_into_caller_buffers_without_waiting_for_control_updates
     Ok(())
 }
 
-#[cfg(feature = "devtools")]
 #[tokio::test]
 async fn viewport_ime_replaces_composition_and_reports_utf16_offsets() -> Result<()> {
     use moli_core::{RendererViewportEdit, RendererViewportEditAction, page::PageInputExt};
@@ -262,7 +261,6 @@ async fn viewport_ime_replaces_composition_and_reports_utf16_offsets() -> Result
     Ok(())
 }
 
-#[cfg(feature = "devtools")]
 #[tokio::test]
 async fn viewport_ime_replaces_a_selection_across_contenteditable_nodes() -> Result<()> {
     use moli_core::{RendererViewportEdit, RendererViewportEditAction};
@@ -333,7 +331,6 @@ async fn viewport_ime_replaces_a_selection_across_contenteditable_nodes() -> Res
     Ok(())
 }
 
-#[cfg(feature = "devtools")]
 #[tokio::test]
 async fn viewport_file_drop_and_link_activation_use_the_current_document() -> Result<()> {
     use moli_core::page::{PageInputExt, RendererDraggedFile};

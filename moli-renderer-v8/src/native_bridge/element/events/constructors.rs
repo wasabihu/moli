@@ -49,7 +49,7 @@ impl ClickEventSource {
 pub(crate) enum TextEditInputType {
     None,
     InsertText,
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     InsertCompositionText,
     #[cfg(feature = "devtools")]
     InsertLineBreak,
@@ -57,7 +57,7 @@ pub(crate) enum TextEditInputType {
     InsertParagraph,
     #[cfg(feature = "devtools")]
     InsertFromDrop,
-    #[cfg(feature = "devtools")]
+    #[cfg(feature = "molio")]
     InsertFromPaste,
     #[cfg(feature = "devtools")]
     DeleteContentBackward,
@@ -70,7 +70,7 @@ impl TextEditInputType {
         match self {
             Self::None => "",
             Self::InsertText => "insertText",
-            #[cfg(feature = "devtools")]
+            #[cfg(feature = "molio")]
             Self::InsertCompositionText => "insertCompositionText",
             #[cfg(feature = "devtools")]
             Self::InsertLineBreak => "insertLineBreak",
@@ -78,7 +78,7 @@ impl TextEditInputType {
             Self::InsertParagraph => "insertParagraph",
             #[cfg(feature = "devtools")]
             Self::InsertFromDrop => "insertFromDrop",
-            #[cfg(feature = "devtools")]
+            #[cfg(feature = "molio")]
             Self::InsertFromPaste => "insertFromPaste",
             #[cfg(feature = "devtools")]
             Self::DeleteContentBackward => "deleteContentBackward",
@@ -90,10 +90,10 @@ impl TextEditInputType {
     pub(crate) fn data(self, text: &str) -> Option<&str> {
         match self {
             Self::InsertText => Some(text),
+            #[cfg(feature = "molio")]
+            Self::InsertCompositionText | Self::InsertFromPaste => Some(text),
             #[cfg(feature = "devtools")]
-            Self::InsertCompositionText => Some(text),
-            #[cfg(feature = "devtools")]
-            Self::InsertFromDrop | Self::InsertFromPaste => Some(text),
+            Self::InsertFromDrop => Some(text),
             Self::None => None,
             #[cfg(feature = "devtools")]
             Self::InsertLineBreak

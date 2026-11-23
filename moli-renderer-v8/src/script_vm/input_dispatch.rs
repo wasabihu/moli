@@ -814,6 +814,7 @@ fn dispatch_touch_pointer_boundary_events(
     }
 }
 
+#[cfg(feature = "molio")]
 impl ScriptVm {
     pub(crate) fn viewport_selected_text(&mut self) -> Result<Option<String>> {
         self.with_default_context_scope(|scope, host| {
@@ -843,7 +844,9 @@ impl ScriptVm {
             self.with_default_context_scope(|scope, host| Ok(editing.apply(scope, host, edit)));
         self.finish_input_command_checkpoint(result)
     }
+}
 
+impl ScriptVm {
     /// Native keyboard delivery has no outer JavaScript invocation. Checkpoint
     /// when each outermost callback returns, including between listeners and
     /// before defaults. Nested dispatchEvent() stays inside its calling script.

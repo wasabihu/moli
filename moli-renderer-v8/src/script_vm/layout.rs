@@ -191,6 +191,7 @@ impl ScriptVm {
         .map_err(anyhow::Error::new)
     }
 
+    #[cfg(feature = "devtools")]
     pub(crate) fn visual_state_token(
         &self,
         document: crate::runtime::RendererDocumentLifecycleIdentity,
@@ -202,12 +203,14 @@ impl ScriptVm {
             .visual_state_token(document, viewport, base_background_color)
     }
 
+    #[cfg(feature = "molio")]
     pub(crate) fn request_viewport_frame(&self) {
         self._context_host
             .borrow()
             .request_realtime_rendering_opportunity();
     }
 
+    #[cfg(feature = "molio")]
     pub(crate) fn viewport_navigation(&self) -> crate::runtime::RendererViewportNavigation {
         let position = self
             ._context_host
@@ -222,6 +225,7 @@ impl ScriptVm {
         }
     }
 
+    #[cfg(feature = "molio")]
     pub(crate) fn set_viewport_resource_wake(&self, wake: &std::sync::Arc<tokio::sync::Notify>) {
         self._context_host.borrow().set_viewport_resource_wake(wake);
     }

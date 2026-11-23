@@ -84,8 +84,10 @@ impl RendererPageCommand {
             | Self::SetDocumentActivity(..)
             | Self::SetEmulatedMedia(..)
             | Self::SetScrollbarsHidden(..)
-            | Self::SetViewportSurface(..)
-            | Self::SubscribeViewportFrames(..)
+            | Self::SetViewportSurface(..) => OwnerOnly,
+
+            #[cfg(feature = "molio")]
+            Self::SubscribeViewportFrames(..)
             | Self::NavigateViewport(..)
             | Self::TraverseViewportHistory(..)
             | Self::ReadViewportEditor

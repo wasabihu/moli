@@ -1,6 +1,7 @@
 use super::*;
 
 impl ScriptVm {
+    #[cfg(feature = "molio")]
     pub(crate) fn navigate_top_level_from_browser(
         &mut self,
         target: Option<String>,

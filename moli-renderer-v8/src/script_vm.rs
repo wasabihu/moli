@@ -652,7 +652,7 @@ mod image_load_event;
 mod indexed_db_task_body;
 #[cfg(feature = "devtools")]
 mod input_dispatch;
-#[cfg(feature = "devtools")]
+#[cfg(feature = "molio")]
 pub(crate) use input_dispatch::root_to_document_frame;
 mod input_helpers;
 mod inspector;

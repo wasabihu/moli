@@ -68,4 +68,4 @@ jobs:
           tool: nextest@0.9.132
 
       - name: Run desktop tests
-        run: cargo nextest run --locked -p molio --profile ci
+        run: cargo nextest run --locked -p molio -p moli-core --bins --test viewport --profile ci
