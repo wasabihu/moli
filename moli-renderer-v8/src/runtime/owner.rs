@@ -376,9 +376,10 @@ enum RenderRuntimeDispatchOutcome {
         token: RendererPageToken,
         failure: PageNavigationOwnerFailure,
     },
-    /// One ordinary Page scheduler turn has restored its stable residence.
-    /// The admission bit is carried across that restore so the owner can join
-    /// a selected parser task directly to its logical phase-one consumer.
+    /// One Page scheduler turn (ordinary or exact-Document lifecycle) has
+    /// restored its stable residence. The admission bit is carried across that
+    /// restore so the owner can join a selected parser task directly to its
+    /// logical phase-one consumer.
     PageTurnComplete {
         result: Result<()>,
         parser_continuation_admitted: bool,
@@ -872,6 +873,42 @@ impl RenderRuntimeTurn {
             | Self::WaitLivePageSubresourceResponse { token, .. }
             | Self::WaitLivePageChildFrameLifecycle { token, .. } => Some(*token),
             _ => None,
+        }
+    }
+
+    /// Return the Page whose parked `PageActivity` waiters should be rechecked
+    /// when this turn completes with `Reply` or `BackgroundComplete`.
+    ///
+    /// Ordinary Page scheduler turns (`RunPageTurn`) are handled separately on
+    /// `PageTurnComplete` so spent wakes and retired-page exits do not wake
+    /// waiters, and `RunOwnerMaintenance` housekeeping must never wake waiters.
+    fn page_activity_wake_token(&self) -> Option<RendererPageToken> {
+        match self {
+            #[cfg(feature = "devtools")]
+            Self::RunDevToolsMainCommand { token, .. } => Some(*token),
+            Self::RunLivePageCommand { token, .. }
+            | Self::ContinueLivePageRuntimeCommandLifecycle { token, .. }
+            | Self::WaitLivePageIdle { token, .. }
+            | Self::WaitLivePageDomStable { token, .. }
+            | Self::WaitLivePageSelector { token, .. }
+            | Self::WaitLivePageScriptTruthy { token, .. }
+            | Self::WaitLivePageRuntimeExpressionAwait { token, .. }
+            | Self::WaitLivePageSubresourceResponse { token, .. }
+            | Self::WaitLivePageChildFrameLifecycle { token, .. }
+            | Self::ClaimLivePageTopLevelNavigationHandoff { token, .. }
+            | Self::FollowLivePagePendingLocationNavigation { token, .. }
+            | Self::ContinueLivePagePendingLocationNavigationPhaseOne { token, .. }
+            | Self::ContinueLivePageNavigationPostParseLifecycle { token, .. } => Some(*token),
+            Self::ContinueAttachedPageCreationLifecycle { pending, .. } => Some(pending.token),
+            Self::WaitLifecycleNavigation(wait) => Some(wait.token()),
+            Self::FinishHtmlCreatePage { .. }
+            | Self::DrainSharedWorkerServiceLane
+            | Self::DrainServiceWorkerServiceLane
+            | Self::RunPageTurn { .. }
+            | Self::RunOwnerMaintenance { .. }
+            | Self::ResumeLivePageDocumentLifecycleAfterReply { .. } => None,
+            #[cfg(feature = "devtools")]
+            Self::RunInspectorMainReceiver { .. } => None,
         }
     }
 
@@ -1436,6 +1473,226 @@ mod tests {
             runtime_command_output_scope_owned_by_dispatch(Some(existing), Some(created)),
             Some(created),
             "a newly installed scope must remain attributable to the dispatch that replaced it"
+        );
+    }
+
+    fn test_live_page_command_turn(token: RendererPageToken) -> RenderRuntimeTurn {
+        RenderRuntimeTurn::RunLivePageCommand {
+            token,
+            command: RendererPageCommand::EvaluateExpression {
+                expression: String::new(),
+                await_promise: false,
+            },
+            capture_policy: super::RendererPageStateCapturePolicy::FullReport,
+        }
+    }
+
+    fn test_pending_navigation_turn(token: RendererPageToken) -> RenderRuntimeTurn {
+        RenderRuntimeTurn::FollowLivePagePendingLocationNavigation {
+            token,
+            stage: PageVmInitStage::Load,
+            follow_count: 0,
+            completion: LivePagePendingNavigationCompletion::Background,
+        }
+    }
+
+    fn test_phase_one_continuation_turn(token: RendererPageToken) -> RenderRuntimeTurn {
+        RenderRuntimeTurn::ContinueLivePagePendingLocationNavigationPhaseOne {
+            token,
+            vm_creation_id: 1,
+            follow_count: 0,
+            completion: LivePagePendingNavigationCompletion::Background,
+        }
+    }
+
+    #[test]
+    fn page_activity_wake_token_covers_commands_and_navigations() {
+        let now = Instant::now();
+        let token = RendererPageToken::new_for_testing(PageId::new_for_testing(12));
+        let mut residence = RendererPageOwnerMaintenanceResidence::new(now);
+        let deadline = residence
+            .indexed_deadline()
+            .expect("maintenance residence should publish a deadline");
+        let task = residence
+            .claim_if_due(token, deadline)
+            .expect("maintenance deadline should be claimable");
+
+        assert_eq!(
+            test_live_page_command_turn(token).page_activity_wake_token(),
+            Some(token)
+        );
+        assert_eq!(
+            test_pending_navigation_turn(token).page_activity_wake_token(),
+            Some(token)
+        );
+        assert_eq!(
+            test_phase_one_continuation_turn(token).page_activity_wake_token(),
+            Some(token)
+        );
+        assert_eq!(
+            RenderRuntimeTurn::RunPageTurn { token }.page_activity_wake_token(),
+            None
+        );
+        assert_eq!(
+            RenderRuntimeTurn::RunOwnerMaintenance { task }.page_activity_wake_token(),
+            None
+        );
+        assert_eq!(
+            RenderRuntimeTurn::DrainSharedWorkerServiceLane.page_activity_wake_token(),
+            None
+        );
+        assert_eq!(
+            RenderRuntimeTurn::DrainServiceWorkerServiceLane.page_activity_wake_token(),
+            None
+        );
+    }
+
+    #[test]
+    fn drain_parked_page_activity_turns_wakes_only_eligible_waiters() {
+        let token_a = RendererPageToken::new_for_testing(PageId::new_for_testing(21));
+        let token_b = RendererPageToken::new_for_testing(PageId::new_for_testing(22));
+        let (closed_tx, closed_rx) = oneshot::channel();
+        drop(closed_rx);
+        let (open_tx, _open_rx) = oneshot::channel();
+        let mut parked_turns = VecDeque::from([
+            RenderRuntimeParkedTurn {
+                reply_tx: Some(open_tx),
+                turn: test_live_page_command_turn(token_a),
+                wake_token: token_a,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_live_page_command_turn(token_b),
+                wake_token: token_b,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_live_page_command_turn(token_a),
+                wake_token: token_a,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::ReplacementDocumentViewSettlement {
+                    expected_vm_creation_id: 9,
+                },
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: Some(closed_tx),
+                turn: test_live_page_command_turn(token_b),
+                wake_token: token_b,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+        ]);
+
+        let mut woken = Vec::new();
+        scheduler::drain_parked_page_activity_turns(token_a, &mut parked_turns, |turn| {
+            woken.push((
+                turn.wake_token,
+                turn.reply_tx.as_ref().is_some_and(|tx| tx.is_closed()),
+            ));
+        });
+
+        assert_eq!(woken, vec![(token_a, false), (token_b, true)]);
+        assert_eq!(parked_turns.len(), 2);
+        assert_eq!(parked_turns[0].wake_token, token_b);
+        assert_eq!(
+            parked_turns[1].condition,
+            RenderRuntimeParkCondition::ReplacementDocumentViewSettlement {
+                expected_vm_creation_id: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn drain_parked_page_activity_turns_respects_committed_document_parser_barriers() {
+        let token = RendererPageToken::new_for_testing(PageId::new_for_testing(31));
+
+        // While the committed-Document parser response barrier is blocked,
+        // neither commands nor non-command PageActivity waiters may wake.
+        let mut blocked_parked = VecDeque::from([
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_phase_one_continuation_turn(token),
+                wake_token: token,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::CommittedDocumentParserContinuation {
+                    parser_unblocked: false,
+                },
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_live_page_command_turn(token),
+                wake_token: token,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_pending_navigation_turn(token),
+                wake_token: token,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+        ]);
+        let mut blocked_woken = 0usize;
+        scheduler::drain_parked_page_activity_turns(token, &mut blocked_parked, |_| {
+            blocked_woken += 1;
+        });
+        assert_eq!(blocked_woken, 0);
+        assert_eq!(blocked_parked.len(), 3);
+
+        // Once parser_unblocked is true, committed-view commands stay parked
+        // so they do not wake only to bounce back behind the parser
+        // continuation, while non-command PageActivity turns still wake.
+        let mut unblocked_parked = VecDeque::from([
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_phase_one_continuation_turn(token),
+                wake_token: token,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::CommittedDocumentParserContinuation {
+                    parser_unblocked: true,
+                },
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_live_page_command_turn(token),
+                wake_token: token,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+            RenderRuntimeParkedTurn {
+                reply_tx: None,
+                turn: test_pending_navigation_turn(token),
+                wake_token: token,
+                ready_at: None,
+                condition: RenderRuntimeParkCondition::PageActivity,
+                command_admission_output_predecessor: None,
+            },
+        ]);
+        let mut unblocked_woken = Vec::new();
+        scheduler::drain_parked_page_activity_turns(token, &mut unblocked_parked, |turn| {
+            unblocked_woken.push(turn.turn.committed_page_view_command_token().is_some());
+        });
+        assert_eq!(unblocked_woken, vec![false]);
+        assert_eq!(unblocked_parked.len(), 2);
+        assert!(
+            unblocked_parked[1]
+                .turn
+                .committed_page_view_command_token()
+                .is_some()
         );
     }
 }

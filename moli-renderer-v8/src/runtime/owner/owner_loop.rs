@@ -196,9 +196,15 @@ impl RendererOwnerHandle {
                         continue;
                     }
                     let completed_page_turn_token = pending_turn.page_owner_token();
+                    let completed_page_activity_token =
+                        pending_turn.turn.page_activity_wake_token();
                     let outcome = self
                         .run_pending_turn_on_owner_local_store(pending_turn.turn)
                         .await;
+                    let page_turn_completed = matches!(
+                        &outcome,
+                        RenderRuntimeDispatchOutcome::PageTurnComplete { .. }
+                    );
                     let parser_continuation_admitted = matches!(
                         &outcome,
                         RenderRuntimeDispatchOutcome::PageTurnComplete {
@@ -217,6 +223,13 @@ impl RendererOwnerHandle {
                             } else if let Err(error) = result {
                                 tracing::debug!(
                                     "background pending turn finished with error: {error}"
+                                );
+                            }
+                            if let Some(token) = completed_page_activity_token {
+                                self.enqueue_parked_page_activity_turns(
+                                    token,
+                                    &mut parked_turns,
+                                    &mut pending_turns,
                                 );
                             }
                         }
@@ -288,6 +301,7 @@ impl RendererOwnerHandle {
                             }
                         }
                         RenderRuntimeDispatchOutcome::PageReplacementCommittedAndContinueNavigation { mut replacement, continuation } => {
+                            let token = replacement.token;
                             if continuation.requires_committed_document_response_release() {
                                 replacement.defer_committed_document_parser_until_response(self.state.page_wake_tx.clone());
                             }
@@ -297,6 +311,11 @@ impl RendererOwnerHandle {
                             // An existing Page retains its close owner even if this
                             // navigation's observer has gone away. Continue its parser.
                             self.enqueue_page_creation_continuation(continuation, &mut pending_turns, &mut parked_turns);
+                            self.enqueue_parked_page_activity_turns(
+                                token,
+                                &mut parked_turns,
+                                &mut pending_turns,
+                            );
                         }
                         RenderRuntimeDispatchOutcome::BackgroundComplete(result)
                         | RenderRuntimeDispatchOutcome::PageTurnComplete { result, .. } => {
@@ -313,6 +332,13 @@ impl RendererOwnerHandle {
                             } else if let Err(error) = result {
                                 tracing::debug!(
                                     "background pending turn finished with error: {error}"
+                                );
+                            }
+                            if let Some(token) = completed_page_activity_token {
+                                self.enqueue_parked_page_activity_turns(
+                                    token,
+                                    &mut parked_turns,
+                                    &mut pending_turns,
                                 );
                             }
                         }
@@ -413,15 +439,22 @@ impl RendererOwnerHandle {
                         }
                         // A bounded Page turn may have published the exact
                         // lifecycle milestone page creation is waiting for.
-                        // Re-admit only that one-shot observer at this owner
-                        // boundary, before a producer wake can advance the
-                        // Page through a follow-up turn. Other waits retain
-                        // their existing wake/deadline contracts.
+                        // Re-admit that one-shot observer before waking other
+                        // parked PageActivity waiters (such as idle or
+                        // awaitPromise waits) that may have missed a wake from
+                        // a deadline-admitted or final Page turn.
                         self.enqueue_parked_page_creation_observers_after_page_turn(
                             token,
                             &mut parked_turns,
                             &mut pending_turns,
                         );
+                        if page_turn_completed {
+                            self.enqueue_parked_page_activity_turns(
+                                token,
+                                &mut parked_turns,
+                                &mut pending_turns,
+                            );
+                        }
                     }
                     continue;
                 }
@@ -603,7 +636,16 @@ impl RendererOwnerHandle {
                     *result,
                     command_admission_output_predecessor.take(),
                 );
+                let replacement_wake_token = match &result {
+                    Ok(RendererOwnerReply::PageReplacementCommitted(replacement)) => {
+                        Some(replacement.token)
+                    }
+                    _ => None,
+                };
                 let _ = reply_tx.send(result);
+                if let Some(token) = replacement_wake_token {
+                    self.enqueue_parked_page_activity_turns(token, parked_turns, pending_turns);
+                }
             }
             #[cfg(feature = "devtools")]
             RenderRuntimeDispatchOutcome::InspectorMainCommandClaimed {
@@ -648,6 +690,7 @@ impl RendererOwnerHandle {
                 mut replacement,
                 continuation,
             } => {
+                let token = replacement.token;
                 if continuation.requires_committed_document_response_release() {
                     replacement.defer_committed_document_parser_until_response(
                         self.state.page_wake_tx.clone(),
@@ -657,6 +700,7 @@ impl RendererOwnerHandle {
                     replacement,
                 )));
                 self.enqueue_page_creation_continuation(continuation, pending_turns, parked_turns);
+                self.enqueue_parked_page_activity_turns(token, parked_turns, pending_turns);
             }
             RenderRuntimeDispatchOutcome::BackgroundComplete(result)
             | RenderRuntimeDispatchOutcome::PageTurnComplete { result, .. } => {

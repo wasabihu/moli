@@ -293,3 +293,134 @@ fn detached_child_dynamic_import_rejection_is_not_reported_to_parent_window() {
         r#"{"parent":[],"child":[]}"#
     );
 }
+
+#[test]
+fn unhandled_rejection_listener_microtasks_drain_in_same_checkpoint() {
+    let mut vm = new_storage_test_vm("https://same-checkpoint-drain.test/");
+
+    vm.eval(
+        r#"
+globalThis.__sameCheckpointEvents = [];
+let resolveAwaited;
+globalThis.__awaited = new Promise(resolve => {
+  resolveAwaited = resolve;
+});
+__awaited.then(value => {
+  __sameCheckpointEvents.push("awaited:" + value);
+});
+addEventListener("unhandledrejection", event => {
+  event.preventDefault();
+  __sameCheckpointEvents.push("unhandledrejection");
+  queueMicrotask(() => {
+    __sameCheckpointEvents.push("microtask");
+  });
+  resolveAwaited("prevented");
+});
+Promise.reject("boom");
+"#,
+    )
+    .expect("same-checkpoint rejection setup should evaluate");
+
+    // Reading `__sameCheckpointEvents` runs before the second `eval`'s
+    // checkpoint, proving that follow-up microtasks queued inside
+    // `unhandledrejection` drained during the first checkpoint.
+    assert_eq!(
+        vm.eval("JSON.stringify(__sameCheckpointEvents)")
+            .expect("same-checkpoint result should evaluate"),
+        r#"["unhandledrejection","microtask","awaited:prevented"]"#
+    );
+}
+
+#[test]
+fn sync_catch_in_unhandled_rejection_drains_without_rejectionhandled_in_same_checkpoint() {
+    let mut vm = new_storage_test_vm("https://sync-catch-same-checkpoint.test/");
+
+    vm.eval(
+        r#"
+globalThis.__syncCatchEvents = [];
+const rejected = Promise.reject("sync-catch");
+onunhandledrejection = event => {
+  event.preventDefault();
+  __syncCatchEvents.push("unhandledrejection");
+  rejected.catch(value => {
+    __syncCatchEvents.push("caught:" + value);
+  });
+};
+onrejectionhandled = () => {
+  __syncCatchEvents.push("rejectionhandled");
+};
+"#,
+    )
+    .expect("sync catch setup should evaluate");
+
+    assert_eq!(
+        vm.eval("JSON.stringify(__syncCatchEvents)")
+            .expect("sync catch result should evaluate"),
+        r#"["unhandledrejection","caught:sync-catch"]"#
+    );
+}
+
+#[test]
+fn microtask_catch_in_unhandled_rejection_dispatches_rejectionhandled_in_same_checkpoint() {
+    let mut vm = new_storage_test_vm("https://microtask-catch-rejectionhandled.test/");
+
+    vm.eval(
+        r#"
+globalThis.__microtaskCatchEvents = [];
+const rejected = Promise.reject("late-microtask");
+onunhandledrejection = event => {
+  event.preventDefault();
+  __microtaskCatchEvents.push("unhandledrejection");
+  queueMicrotask(() => {
+    rejected.catch(value => {
+      __microtaskCatchEvents.push("caught:" + value);
+    });
+  });
+};
+onrejectionhandled = () => {
+  __microtaskCatchEvents.push("rejectionhandled");
+};
+"#,
+    )
+    .expect("microtask catch setup should evaluate");
+
+    assert_eq!(
+        vm.eval("JSON.stringify(__microtaskCatchEvents)")
+            .expect("microtask catch result should evaluate"),
+        r#"["unhandledrejection","rejectionhandled","caught:late-microtask"]"#
+    );
+}
+
+#[test]
+fn nested_rejection_created_inside_unhandled_rejection_stays_bounded() {
+    let mut vm = new_storage_test_vm("https://nested-rejection-bounded.test/");
+
+    vm.eval(
+        r#"
+globalThis.__nestedRejections = [];
+addEventListener("unhandledrejection", event => {
+  event.preventDefault();
+  __nestedRejections.push(String(event.reason));
+  if (event.reason === "first") {
+    Promise.reject("second");
+  }
+});
+Promise.reject("first");
+"#,
+    )
+    .expect("nested rejection setup should evaluate");
+
+    // The follow-up microtask drain does not recursively flush rejections
+    // created during `unhandledrejection`; the nested rejection is reported
+    // cleanly on the next checkpoint instead of looping unboundedly.
+    assert_eq!(
+        vm.eval("JSON.stringify(__nestedRejections)")
+            .expect("first checkpoint rejection observation should evaluate"),
+        r#"["first"]"#
+    );
+    assert_eq!(
+        vm.eval("JSON.stringify(__nestedRejections)")
+            .expect("second checkpoint rejection observation should evaluate"),
+        r#"["first","second"]"#
+    );
+}

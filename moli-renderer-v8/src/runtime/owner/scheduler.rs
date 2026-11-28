@@ -763,6 +763,17 @@ impl RendererOwnerHandle {
         }
     }
 
+    pub(super) fn enqueue_parked_page_activity_turns(
+        &self,
+        token: RendererPageToken,
+        parked_turns: &mut VecDeque<RenderRuntimeParkedTurn>,
+        pending_turns: &mut RenderRuntimePendingTurnQueue,
+    ) {
+        drain_parked_page_activity_turns(token, parked_turns, |parked_turn| {
+            self.enqueue_parked_turn(parked_turn, pending_turns);
+        });
+    }
+
     pub(super) fn enqueue_parked_turns_for_wake(
         &self,
         token: RendererPageToken,
@@ -896,7 +907,10 @@ impl RendererOwnerHandle {
                     page_id = token.page_id.as_u64(),
                     "document lifecycle owner turn failed: {error}"
                 );
-                return RenderRuntimeDispatchOutcome::BackgroundComplete(Err(error));
+                return RenderRuntimeDispatchOutcome::PageTurnComplete {
+                    result: Err(error),
+                    parser_continuation_admitted: false,
+                };
             }
         };
         let action = outcome.action;
@@ -936,7 +950,10 @@ impl RendererOwnerHandle {
                     if let Some(output) = concrete_output {
                         self.publish_renderer_output(output);
                     }
-                    return RenderRuntimeDispatchOutcome::BackgroundComplete(Err(error));
+                    return RenderRuntimeDispatchOutcome::PageTurnComplete {
+                        result: Err(error),
+                        parser_continuation_admitted: false,
+                    };
                 }
             }
         } else {
@@ -982,10 +999,16 @@ impl RendererOwnerHandle {
 
         if let DocumentLifecycleTurnAction::RequestedTopLevelNavigation { stage, .. } = action {
             if delegated_top_level_navigation {
-                return RenderRuntimeDispatchOutcome::BackgroundComplete(Ok(()));
+                return RenderRuntimeDispatchOutcome::PageTurnComplete {
+                    result: Ok(()),
+                    parser_continuation_admitted: false,
+                };
             }
             if !should_follow_pending_location_navigation {
-                return RenderRuntimeDispatchOutcome::BackgroundComplete(Ok(()));
+                return RenderRuntimeDispatchOutcome::PageTurnComplete {
+                    result: Ok(()),
+                    parser_continuation_admitted: false,
+                };
             }
             return RenderRuntimeDispatchOutcome::ContinueNextTurn(Box::new(
                 RenderRuntimeTurn::FollowLivePagePendingLocationNavigation {
@@ -997,7 +1020,10 @@ impl RendererOwnerHandle {
             ));
         }
 
-        RenderRuntimeDispatchOutcome::BackgroundComplete(Ok(()))
+        RenderRuntimeDispatchOutcome::PageTurnComplete {
+            result: Ok(()),
+            parser_continuation_admitted: false,
+        }
     }
 
     pub(super) fn finish_page_turn(
@@ -1275,5 +1301,51 @@ impl RendererOwnerHandle {
             command_admission_output_predecessor: None,
         });
         true
+    }
+}
+
+pub(super) fn drain_parked_page_activity_turns(
+    token: RendererPageToken,
+    parked_turns: &mut VecDeque<RenderRuntimeParkedTurn>,
+    mut on_ready: impl FnMut(RenderRuntimeParkedTurn),
+) {
+    let mut has_committed_document_parser_continuation = false;
+    for turn in parked_turns.iter() {
+        if turn.wake_token != token {
+            continue;
+        }
+        if turn.condition.blocks_page_activity_until_parser_unblocked() {
+            return;
+        }
+        if matches!(
+            turn.condition,
+            RenderRuntimeParkCondition::CommittedDocumentParserContinuation { .. }
+        ) {
+            has_committed_document_parser_continuation = true;
+        }
+    }
+    let mut index = 0;
+    while index < parked_turns.len() {
+        let closed = parked_turns[index]
+            .reply_tx
+            .as_ref()
+            .is_some_and(|tx| tx.is_closed());
+        let deferred_for_parser = has_committed_document_parser_continuation
+            && parked_turns[index]
+                .turn
+                .committed_page_view_command_token()
+                .is_some();
+        let should_wake = closed
+            || (parked_turns[index].wake_token == token
+                && parked_turns[index].condition == RenderRuntimeParkCondition::PageActivity
+                && !deferred_for_parser);
+        if should_wake {
+            let Some(parked_turn) = parked_turns.remove(index) else {
+                break;
+            };
+            on_ready(parked_turn);
+        } else {
+            index += 1;
+        }
     }
 }

@@ -199,6 +199,70 @@ fn flush_promise_rejection_state(
     pending_len
 }
 
+fn perform_v8_microtask_checkpoint_and_restore_deferred_scopes(scope: &mut v8::PinScope<'_, '_>) {
+    scope.perform_microtask_checkpoint();
+    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
+        let host = unsafe { &mut *host_ptr };
+        crate::native_bridge::restore_deferred_active_child_window_scope_if_present(scope, host);
+        crate::native_bridge::restore_deferred_active_lightweight_popup_scope_if_present(
+            scope, host,
+        );
+        host.finish_deferred_child_subresource_request_scope_pop();
+    }
+}
+
+fn merge_promise_hook_stats(
+    total: &mut moli_trace::PromiseHookStats,
+    extra: moli_trace::PromiseHookStats,
+) {
+    total.init_count += extra.init_count;
+    total.resolve_count += extra.resolve_count;
+    total.reaction_before_count += extra.reaction_before_count;
+    total.reaction_after_count += extra.reaction_after_count;
+}
+
+fn merge_dom_binding_operation_stats(
+    total: &mut Vec<moli_trace::DomBindingOperationStats>,
+    extra: Vec<moli_trace::DomBindingOperationStats>,
+) {
+    if extra.is_empty() {
+        return;
+    }
+    for stat in extra {
+        if let Some(existing) = total.iter_mut().find(|entry| entry.op == stat.op) {
+            existing.count += stat.count;
+            existing.total_us += stat.total_us;
+            existing.max_us = existing.max_us.max(stat.max_us);
+        } else {
+            total.push(stat);
+        }
+    }
+    total.sort_by_key(|stat| stat.op);
+}
+
+fn summarize_dom_binding_stats(
+    stats: &[moli_trace::DomBindingOperationStats],
+) -> (u64, u128, (&'static str, u128), String) {
+    let dom_operation_count: u64 = stats.iter().map(|stat| stat.count).sum();
+    let dom_total_us: u128 = stats.iter().map(|stat| stat.total_us).sum();
+    let dom_max = stats
+        .iter()
+        .max_by_key(|stat| stat.max_us)
+        .map(|stat| (stat.op, stat.max_us))
+        .unwrap_or(("<none>", 0));
+    let dom_operations = stats
+        .iter()
+        .map(|stat| {
+            format!(
+                "{}:count={},total_us={},max_us={}",
+                stat.op, stat.count, stat.total_us, stat.max_us
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    (dom_operation_count, dom_total_us, dom_max, dom_operations)
+}
+
 pub(crate) fn perform_microtask_checkpoint_and_report_pending_promise_rejections(
     scope: &mut v8::PinScope<'_, '_>,
 ) {
@@ -216,43 +280,20 @@ pub(crate) fn perform_microtask_checkpoint_and_report_pending_promise_rejections
         }
     }
     let checkpoint_started = trace_enabled.then(Instant::now);
-    scope.perform_microtask_checkpoint();
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        let host = unsafe { &mut *host_ptr };
-        crate::native_bridge::restore_deferred_active_child_window_scope_if_present(scope, host);
-        crate::native_bridge::restore_deferred_active_lightweight_popup_scope_if_present(
-            scope, host,
-        );
-        host.finish_deferred_child_subresource_request_scope_pop();
-    }
-    let promise_stats = if trace_enabled {
+    perform_v8_microtask_checkpoint_and_restore_deferred_scopes(scope);
+    let mut promise_stats = if trace_enabled {
         moli_trace::take_promise_hook_stats()
     } else {
         moli_trace::PromiseHookStats::default()
     };
-    let dom_binding_stats = if dom_binding_trace_enabled {
+    let mut dom_binding_stats = if dom_binding_trace_enabled {
         moli_trace::take_dom_binding_operation_stats()
     } else {
         Vec::new()
     };
-    let dom_operation_count: u64 = dom_binding_stats.iter().map(|stat| stat.count).sum();
-    let dom_total_us: u128 = dom_binding_stats.iter().map(|stat| stat.total_us).sum();
-    let dom_max = dom_binding_stats
-        .iter()
-        .max_by_key(|stat| stat.max_us)
-        .map(|stat| (stat.op, stat.max_us))
-        .unwrap_or(("<none>", 0));
-    let dom_operations = dom_binding_stats
-        .iter()
-        .map(|stat| {
-            format!(
-                "{}:count={},total_us={},max_us={}",
-                stat.op, stat.count, stat.total_us, stat.max_us
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(";");
     if let Some(started) = checkpoint_started {
+        let (dom_operation_count, dom_total_us, dom_max, dom_operations) =
+            summarize_dom_binding_stats(&dom_binding_stats);
         tracing::info!(
             target: "moli_cdp_runtime",
             stage = "microtask_checkpoint_v8_done",
@@ -270,6 +311,13 @@ pub(crate) fn perform_microtask_checkpoint_and_report_pending_promise_rejections
     }
     let flush_started = trace_enabled.then(Instant::now);
     let pending_rejections = flush_agent_pending_promise_rejections(scope);
+    if pending_rejections > 0 {
+        // Dispatching `unhandledrejection` runs author event listeners after
+        // the initial V8 microtask drain. Drain any follow-up microtasks they
+        // enqueued (such as settling a Promise awaited by Runtime.evaluate) so
+        // reactions do not remain stranded until an unrelated later turn.
+        perform_v8_microtask_checkpoint_and_restore_deferred_scopes(scope);
+    }
     let ran_end_of_checkpoint_tasks =
         crate::context_bootstrap::run_end_of_microtask_checkpoint_tasks(scope);
     if (pending_rejections > 0 || ran_end_of_checkpoint_tasks > 0)
@@ -283,6 +331,15 @@ pub(crate) fn perform_microtask_checkpoint_and_report_pending_promise_rejections
     {
         environment.finish_related_page_turn_completions();
     }
+    if trace_enabled {
+        merge_promise_hook_stats(&mut promise_stats, moli_trace::take_promise_hook_stats());
+        if dom_binding_trace_enabled {
+            merge_dom_binding_operation_stats(
+                &mut dom_binding_stats,
+                moli_trace::take_dom_binding_operation_stats(),
+            );
+        }
+    }
     if let Some(started) = flush_started {
         tracing::info!(
             target: "moli_cdp_runtime",
@@ -292,6 +349,8 @@ pub(crate) fn perform_microtask_checkpoint_and_report_pending_promise_rejections
         );
     }
     if let Some(started) = trace_started {
+        let (dom_operation_count, dom_total_us, dom_max, dom_operations) =
+            summarize_dom_binding_stats(&dom_binding_stats);
         tracing::info!(
             target: "moli_cdp_runtime",
             stage = "microtask_checkpoint_done",
