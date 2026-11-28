@@ -132,6 +132,20 @@ impl ScriptVm {
                 .runtime_evaluate_payload_from_completion(completion)
                 .map(RuntimeEvaluateOutcome::Complete),
             Err(tokio::sync::oneshot::error::TryRecvError::Empty) if await_promise => {
+                if let Some(owner_wake) = self
+                    ._context_host
+                    .borrow()
+                    .page_script_environment()
+                    .and_then(|environment| {
+                        environment
+                            .page_runtime_task_source()
+                            .owner_attached_page_source_wakes()
+                    })
+                    .map(|(_, owner_wake)| owner_wake)
+                {
+                    self.page_inspector
+                        .arm_internal_runtime_evaluate_page_activity_wake(call_id, owner_wake);
+                }
                 self.pending_internal_runtime_evaluates
                     .insert(call_id, response_rx);
                 Ok(RuntimeEvaluateOutcome::Pending(

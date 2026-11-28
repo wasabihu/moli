@@ -424,3 +424,36 @@ Promise.reject("first");
         r#"["first","second"]"#
     );
 }
+
+#[test]
+fn nested_rejection_without_page_task_capabilities_does_not_panic() {
+    let mut vm = new_storage_test_vm_without_page_residence(
+        "https://nested-rejection-without-capabilities.test/",
+    );
+
+    vm.eval(
+        r#"
+globalThis.__nestedWithoutCaps = [];
+addEventListener("unhandledrejection", event => {
+  event.preventDefault();
+  __nestedWithoutCaps.push(String(event.reason));
+  if (event.reason === "first") {
+    Promise.reject("second");
+  }
+});
+Promise.reject("first");
+"#,
+    )
+    .expect("nested rejection setup without Page task capabilities must not panic");
+
+    assert_eq!(
+        vm.eval("JSON.stringify(__nestedWithoutCaps)")
+            .expect("first checkpoint rejection observation should evaluate"),
+        r#"["first"]"#
+    );
+    assert_eq!(
+        vm.eval("JSON.stringify(__nestedWithoutCaps)")
+            .expect("second checkpoint rejection observation should evaluate"),
+        r#"["first","second"]"#
+    );
+}

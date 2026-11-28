@@ -330,6 +330,9 @@ impl RendererOwnerHandle {
                 );
                 self.enqueue_parked_turns_for_wake(token, parked_turns, pending_turns);
             }
+            RendererOwnerWake::PageActivity { token } => {
+                self.enqueue_parked_page_activity_turns(token, parked_turns, pending_turns);
+            }
             RendererOwnerWake::PostResponseDocumentLifecycle { token, document } => {
                 if !release_post_response_document_lifecycle_on_bound_owner_local_store(
                     token, document,

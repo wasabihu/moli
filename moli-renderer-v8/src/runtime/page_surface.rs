@@ -3,7 +3,6 @@ use super::*;
 use crate::native_bridge::{
     PendingRuntimeObservableConsoleSourceEvent, RuntimeObservableContextToken,
 };
-#[cfg(feature = "devtools")]
 use crate::page_task_queue::RendererOwnerWakeSender;
 use crate::protocol_types::{
     ChildFrameDocumentOpenedSnapshot, ChildFrameTreeEventSnapshot, ChildFrameTreeSnapshot,
@@ -3536,6 +3535,7 @@ impl RendererRuntimeInspectorResponseDestination {
 #[derive(Clone)]
 enum RendererRuntimeInspectorResponsePublicationBoundary {
     Immediate,
+    ImmediateWithPageActivityWake(RendererOwnerWakeSender),
     #[cfg(feature = "devtools")]
     PageOwner(RendererOwnerWakeSender),
     #[cfg(feature = "devtools")]
@@ -3629,6 +3629,20 @@ impl RendererRuntimeInspectorResponseSender {
         self
     }
 
+    pub(crate) fn arm_page_activity_wake(&mut self, owner_wake: RendererOwnerWakeSender) {
+        assert!(
+            matches!(
+                self.publication_boundary,
+                RendererRuntimeInspectorResponsePublicationBoundary::Immediate
+            ),
+            "page activity wake may only be armed on an immediate inspector response sender"
+        );
+        self.publication_boundary =
+            RendererRuntimeInspectorResponsePublicationBoundary::ImmediateWithPageActivityWake(
+                owner_wake,
+            );
+    }
+
     #[cfg(feature = "devtools")]
     pub(crate) fn defer_publication_to_page_owner(
         mut self,
@@ -3719,6 +3733,15 @@ impl RendererRuntimeInspectorResponseSender {
         match publication_boundary {
             RendererRuntimeInspectorResponsePublicationBoundary::Immediate => {
                 publication.commit(None).map(|_| ())
+            }
+            RendererRuntimeInspectorResponsePublicationBoundary::ImmediateWithPageActivityWake(
+                owner_wake,
+            ) => {
+                let result = publication.commit(None).map(|_| ());
+                if result.is_ok() {
+                    owner_wake.signal_page_activity();
+                }
+                result
             }
             #[cfg(feature = "devtools")]
             RendererRuntimeInspectorResponsePublicationBoundary::PageOwner(owner_wake) => {
@@ -4090,6 +4113,55 @@ mod renderer_runtime_inspector_response_channel_tests {
             Some(expected_predecessor),
             "a response must retain its exact Page-stream predecessor"
         );
+    }
+
+    #[test]
+    fn armed_page_activity_wake_signals_only_after_commit_and_stays_silent_when_dropped_or_unarmed()
+    {
+        use crate::page_task_queue::{RendererOwnerWake, RendererOwnerWakeSender};
+        use tokio::sync::mpsc::error::TryRecvError as MpscTryRecvError;
+
+        let token = RendererPageToken::new_for_testing(PageId::new_for_testing(42));
+
+        // Armed + open receiver commits the response and then signals PageActivity.
+        let (wake_tx, mut wake_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = oneshot::channel();
+        let mut sender = RendererRuntimeInspectorResponseSender::new(7, response_tx);
+        sender.arm_page_activity_wake(RendererOwnerWakeSender::new(wake_tx, token));
+        sender
+            .send_output(output(7))
+            .expect("open armed sender should commit");
+        assert!(
+            response_rx.try_recv().is_ok(),
+            "response must already be committed when PageActivity wake is delivered"
+        );
+        match wake_rx.try_recv() {
+            Ok(RendererOwnerWake::PageActivity { token: actual }) => assert_eq!(actual, token),
+            other => panic!("expected PageActivity wake, got {other:?}"),
+        }
+
+        // Armed + dropped receiver must not emit a spurious wake.
+        let (closed_wake_tx, mut closed_wake_rx) = tokio::sync::mpsc::unbounded_channel();
+        let _keep_wake_channel_open = closed_wake_tx.clone();
+        let (closed_tx, closed_rx) = oneshot::channel();
+        drop(closed_rx);
+        let mut closed_sender = RendererRuntimeInspectorResponseSender::new(8, closed_tx);
+        closed_sender.arm_page_activity_wake(RendererOwnerWakeSender::new(closed_wake_tx, token));
+        assert!(
+            closed_sender.send_output(output(8)).is_err(),
+            "dropped receiver should fail send"
+        );
+        assert!(matches!(
+            closed_wake_rx.try_recv(),
+            Err(MpscTryRecvError::Empty)
+        ));
+
+        // Unarmed sender stays silent.
+        let (unarmed_tx, mut unarmed_rx) = oneshot::channel();
+        RendererRuntimeInspectorResponseSender::new(9, unarmed_tx)
+            .send_output(output(9))
+            .expect("unarmed sender should commit");
+        assert!(unarmed_rx.try_recv().is_ok());
     }
 
     #[cfg(feature = "devtools")]

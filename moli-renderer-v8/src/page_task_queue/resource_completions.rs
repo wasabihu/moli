@@ -80,11 +80,19 @@ pub(crate) enum RendererOwnerWake {
         token: RendererPageToken,
         vm_creation_id: u64,
     },
+    /// A parked `PageActivity` waiter on `token` has new observable readiness
+    /// (for example, a cross-Page shared-isolate Promise settling an internal
+    /// `Runtime.evaluate` response) without manufacturing a new `RunPageTurn`.
+    PageActivity { token: RendererPageToken },
 }
 
 impl RendererOwnerWake {
     pub(crate) fn page(token: RendererPageToken, source: RendererOwnerWakeSource) -> Self {
         Self::Page { token, source }
+    }
+
+    pub(crate) fn page_activity(token: RendererPageToken) -> Self {
+        Self::PageActivity { token }
     }
 
     pub(crate) fn post_response_document_lifecycle(
@@ -135,6 +143,7 @@ impl RendererOwnerWake {
             #[cfg(feature = "devtools")]
             Self::RuntimeInspectorResponsePublication { token, .. } => token.page_id(),
             Self::Page { token, .. }
+            | Self::PageActivity { token }
             | Self::PostResponseDocumentLifecycle { token, .. }
             | Self::CommittedDocumentParserUnblocked { token, .. }
             | Self::TopLevelNavigationHandoff { token, .. }
@@ -146,6 +155,9 @@ impl RendererOwnerWake {
     pub(crate) fn source_for_test(&self) -> RendererOwnerWakeSource {
         match self {
             Self::Page { source, .. } => *source,
+            Self::PageActivity { .. } => {
+                panic!("a parked PageActivity wake is not a Page scheduling source wake")
+            }
             Self::PostResponseDocumentLifecycle { .. } => RendererOwnerWakeSource::Runtime(
                 RendererOwnerRuntimeActivitySource::DocumentLifecycleTurn,
             ),
@@ -335,6 +347,10 @@ impl RendererOwnerWakeSender {
                 publication.commit(None).map(|_| ())
             }
         }
+    }
+
+    pub(crate) fn signal_page_activity(&self) {
+        let _ = self.tx.send(RendererOwnerWake::page_activity(self.token));
     }
 
     pub(super) fn signal_source(&self, source: RendererOwnerWakeSource) {

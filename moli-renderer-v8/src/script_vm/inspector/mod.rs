@@ -351,6 +351,15 @@ impl DocumentInspectorBinding {
         self.agent.cancel_response_callback(&session_key, call_id);
     }
 
+    pub(super) fn arm_internal_runtime_evaluate_page_activity_wake(
+        &self,
+        call_id: i32,
+        owner_wake: crate::page_task_queue::RendererOwnerWakeSender,
+    ) {
+        self.agent
+            .arm_internal_runtime_evaluate_page_activity_wake(call_id, owner_wake);
+    }
+
     pub(super) fn cancel_internal_runtime_evaluate_response(&self, call_id: i32) {
         self.agent
             .cancel_internal_runtime_evaluate_response(call_id);

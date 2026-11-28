@@ -378,6 +378,21 @@ impl InspectorOutbound {
         );
     }
 
+    pub(in crate::script_vm) fn arm_response_callback_page_activity_wake(
+        &self,
+        call_id: i32,
+        owner_wake: crate::page_task_queue::RendererOwnerWakeSender,
+    ) {
+        if let Some(callback) = self
+            .response_routing
+            .borrow_mut()
+            .pending_response_callbacks
+            .get_mut(&call_id)
+        {
+            callback.arm_page_activity_wake(owner_wake);
+        }
+    }
+
     pub(in crate::script_vm) fn cancel_response_callback(&self, call_id: i32) {
         let mut guard = self.response_routing.borrow_mut();
         if let Some(callback) = guard.pending_response_callbacks.remove(&call_id) {

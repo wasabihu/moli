@@ -195,13 +195,15 @@ impl PageScriptHost {
     }
 
     pub(crate) fn dispatch_authorized_file_reading_task(
-        &mut self,
         scope: &mut v8::PinScope<'_, '_>,
         host_ptr: *mut PageScriptHost,
         target: WindowExecutionContextIdentity,
         task: FileReadingTask,
     ) -> PageFileReadingTargetEffect {
-        if !self.window_execution_context_identity_is_current(target) {
+        // SAFETY: `host_ptr` points to the live `PageScriptHost` for this
+        // single-threaded V8 context, and this temporary shared borrow ends
+        // before `task` executes JS or triggers nested microtask checkpoints.
+        if !unsafe { &*host_ptr }.window_execution_context_identity_is_current(target) {
             return PageFileReadingTargetEffect::CurrentOwnerCallbackRetired;
         }
         let context = v8::Local::new(scope, &task.context);

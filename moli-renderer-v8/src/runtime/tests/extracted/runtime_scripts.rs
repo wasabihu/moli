@@ -4399,3 +4399,311 @@ async fn navigation_follow_publishes_command_output_before_replacing_document() 
         .await
         .expect("close navigation-output page");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nested_unhandled_rejection_flushes_on_idle_page_without_extra_eval() {
+    let runtime = JsRuntime::initialize();
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let url = url::Url::parse("https://example.test/nested-unhandled-rejection-idle").unwrap();
+    let mut page =
+        create_test_html_page(&runtime, &loader, url, "<!doctype html><body>idle</body>").await;
+
+    let (reply, _) = tokio::time::timeout(
+        Duration::from_secs(2),
+        page.run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: r#"new Promise(resolve => {
+                const seen = [];
+                addEventListener("unhandledrejection", event => {
+                    event.preventDefault();
+                    const reason = String(event.reason);
+                    seen.push(reason);
+                    if (reason === "first") {
+                        Promise.reject("second");
+                    } else if (reason === "second") {
+                        queueMicrotask(() => {
+                            Promise.reject("third");
+                        });
+                    } else if (reason === "third") {
+                        resolve(JSON.stringify(seen));
+                    }
+                });
+                Promise.reject("first");
+            })"#
+            .to_owned(),
+            await_promise: true,
+        }),
+    )
+    .await
+    .expect("nested rejections created during unhandledrejection must flush on an idle page")
+    .expect("nested rejection awaitPromise expression should succeed");
+    assert_eq!(
+        renderer_json_value(reply),
+        Some(serde_json::json!(r#"["first","second","third"]"#))
+    );
+
+    page.close_async()
+        .await
+        .expect("close nested-unhandled-rejection page");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn caught_nested_rejection_inside_unhandled_rejection_does_not_fire_second_event() {
+    let runtime = JsRuntime::initialize();
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let url = url::Url::parse("https://example.test/caught-nested-rejection-idle").unwrap();
+    let mut page =
+        create_test_html_page(&runtime, &loader, url, "<!doctype html><body>idle</body>").await;
+
+    let (reply, _) = tokio::time::timeout(
+        Duration::from_secs(2),
+        page.run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: r#"new Promise(resolve => {
+                globalThis.__seen = [];
+                addEventListener("unhandledrejection", event => {
+                    event.preventDefault();
+                    const reason = String(event.reason);
+                    globalThis.__seen.push(reason);
+                    if (reason === "first") {
+                        const second = Promise.reject("caught-in-microtask");
+                        queueMicrotask(() => {
+                            second.catch(err => {
+                                globalThis.__seen.push("caught:" + err);
+                                resolve(JSON.stringify(globalThis.__seen));
+                            });
+                        });
+                    }
+                });
+                Promise.reject("first");
+            })"#
+            .to_owned(),
+            await_promise: true,
+        }),
+    )
+    .await
+    .expect("microtask-caught nested rejection should settle promptly")
+    .expect("microtask-caught nested rejection expression should succeed");
+    assert_eq!(
+        renderer_json_value(reply),
+        Some(serde_json::json!(
+            r#"["first","caught:caught-in-microtask"]"#
+        ))
+    );
+
+    // Wait briefly and confirm no spurious second `unhandledrejection` fired.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (after, _) = page
+        .run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: "JSON.stringify(globalThis.__seen)".to_owned(),
+            await_promise: false,
+        })
+        .await
+        .expect("post-check eval should succeed");
+    assert_eq!(
+        renderer_json_value(after),
+        Some(serde_json::json!(
+            r#"["first","caught:caught-in-microtask"]"#
+        ))
+    );
+
+    page.close_async()
+        .await
+        .expect("close caught-nested-rejection page");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nested_unhandled_rejection_in_child_iframe_flushes_on_idle_page() {
+    let runtime = JsRuntime::initialize();
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let url = url::Url::parse("https://example.test/nested-unhandled-rejection-iframe").unwrap();
+    let mut page = create_test_html_page(
+        &runtime,
+        &loader,
+        url,
+        r#"<!doctype html><body><iframe id="child"></iframe></body>"#,
+    )
+    .await;
+
+    let (reply, _) = tokio::time::timeout(
+        Duration::from_secs(2),
+        page.run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: r#"new Promise(resolve => {
+                const childWin = document.getElementById("child").contentWindow;
+                const seen = [];
+                childWin.addEventListener("unhandledrejection", event => {
+                    event.preventDefault();
+                    const reason = String(event.reason);
+                    seen.push(reason);
+                    if (reason === "iframe-first") {
+                        childWin.Promise.reject("iframe-second");
+                    } else if (reason === "iframe-second") {
+                        resolve(JSON.stringify(seen));
+                    }
+                });
+                childWin.Promise.reject("iframe-first");
+            })"#
+            .to_owned(),
+            await_promise: true,
+        }),
+    )
+    .await
+    .expect("nested rejections inside a child iframe must flush on an idle page")
+    .expect("child iframe nested rejection expression should succeed");
+    assert_eq!(
+        renderer_json_value(reply),
+        Some(serde_json::json!(r#"["iframe-first","iframe-second"]"#))
+    );
+
+    page.close_async()
+        .await
+        .expect("close child-iframe nested-rejection page");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn file_reader_load_nested_unhandled_rejection_flushes_without_borrow_conflict() {
+    let runtime = JsRuntime::initialize();
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let url = url::Url::parse("https://example.test/file-reader-nested-rejection").unwrap();
+    let mut page =
+        create_test_html_page(&runtime, &loader, url, "<!doctype html><body>reader</body>").await;
+
+    let (reply, _) = tokio::time::timeout(
+        Duration::from_secs(2),
+        page.run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: r#"new Promise(resolve => {
+                const seen = [];
+                addEventListener("unhandledrejection", event => {
+                    event.preventDefault();
+                    const reason = String(event.reason);
+                    seen.push(reason);
+                    if (reason === "reader-first") {
+                        Promise.reject("reader-second");
+                    } else if (reason === "reader-second") {
+                        resolve(JSON.stringify(seen));
+                    }
+                });
+                const reader = new FileReader();
+                reader.onload = () => {
+                    Promise.reject("reader-first");
+                };
+                reader.readAsText(new Blob(["payload"]));
+            })"#
+            .to_owned(),
+            await_promise: true,
+        }),
+    )
+    .await
+    .expect("nested rejection created in FileReader.onload must flush without borrow conflict")
+    .expect("FileReader nested rejection expression should succeed");
+    assert_eq!(
+        renderer_json_value(reply),
+        Some(serde_json::json!(r#"["reader-first","reader-second"]"#))
+    );
+
+    page.close_async()
+        .await
+        .expect("close file-reader nested-rejection page");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unbounded_nested_unhandled_rejection_does_not_starve_commands_or_close() {
+    let runtime = JsRuntime::initialize();
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let url = url::Url::parse("https://example.test/unbounded-nested-rejection").unwrap();
+    let mut page =
+        create_test_html_page(&runtime, &loader, url, "<!doctype html><body>loop</body>").await;
+
+    page.run_async_command(RendererPageCommand::EvaluateExpression {
+        expression: r#"(() => {
+            globalThis.__count = 0;
+            globalThis.__stop = false;
+            addEventListener("unhandledrejection", event => {
+                event.preventDefault();
+                globalThis.__count += 1;
+                if (!globalThis.__stop) {
+                    Promise.reject("loop-" + globalThis.__count);
+                }
+            });
+            Promise.reject("loop-0");
+            return true;
+        })()"#
+            .to_owned(),
+        await_promise: false,
+    })
+    .await
+    .expect("unbounded nested rejection setup should succeed");
+
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let (reply, _) = tokio::time::timeout(
+        Duration::from_secs(2),
+        page.run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: "(() => { globalThis.__stop = true; return globalThis.__count > 1; })()"
+                .to_owned(),
+            await_promise: false,
+        }),
+    )
+    .await
+    .expect("subsequent command must overtake continuous nested unhandledrejection turns")
+    .expect("stop command should succeed");
+    assert_eq!(renderer_json_value(reply), Some(serde_json::json!(true)));
+
+    tokio::time::timeout(Duration::from_secs(2), page.close_async())
+        .await
+        .expect("page close must not be starved by nested rejection turns")
+        .expect("close unbounded-nested-rejection page");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wait_for_script_truthy_polls_already_ready_promise_after_deadline_expiry() {
+    let runtime = JsRuntime::initialize();
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let url = url::Url::parse("https://example.test/wait-for-script-truthy-expiry").unwrap();
+    let mut page =
+        create_test_html_page(&runtime, &loader, url, "<!doctype html><body>expiry</body>").await;
+
+    // Resolve the awaited promise inside a timer turn that overruns the wait
+    // deadline; the next poll turn must observe the already-ready result
+    // instead of failing on the expired deadline before polling.
+    page.run_async_command(RendererPageCommand::WaitForScriptTruthy {
+        expression: r#"() => new Promise(resolve => {
+            setTimeout(() => {
+                resolve(true);
+                const end = Date.now() + 220;
+                while (Date.now() < end) {}
+            }, 15);
+        })"#
+        .to_owned(),
+        timeout_ms: 150,
+        loader: loader.clone(),
+    })
+    .await
+    .expect("already-settled truthy promise must succeed even if its turn overran the deadline");
+
+    // Negative control: when the promise settles falsy (or stays pending) as
+    // the turn overruns the deadline, the wait still times out promptly.
+    let timeout_error = page
+        .run_async_command(RendererPageCommand::WaitForScriptTruthy {
+            expression: r#"() => new Promise(resolve => {
+                setTimeout(() => {
+                    resolve(false);
+                    const end = Date.now() + 220;
+                    while (Date.now() < end) {}
+                }, 15);
+            })"#
+            .to_owned(),
+            timeout_ms: 150,
+            loader: loader.clone(),
+        })
+        .await
+        .err()
+        .expect("falsy settlement past the deadline must still time out");
+    assert!(
+        timeout_error
+            .to_string()
+            .contains("timed out waiting for script to become truthy"),
+        "unexpected timeout error: {timeout_error}"
+    );
+
+    page.close_async()
+        .await
+        .expect("close wait-for-script-truthy-expiry page");
+}

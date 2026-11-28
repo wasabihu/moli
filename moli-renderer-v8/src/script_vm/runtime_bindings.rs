@@ -79,6 +79,32 @@ fn flush_agent_pending_promise_rejections(scope: &mut v8::PinScope<'_, '_>) -> u
         .sum()
 }
 
+pub(crate) fn has_pending_agent_promise_rejections(scope: &mut v8::PinScope<'_, '_>) -> bool {
+    let Some(slot) = scope.get_slot_mut::<AgentPendingPromiseRejections>() else {
+        return false;
+    };
+    slot.0.retain(|state| !state.pending.borrow().is_empty());
+    !slot.0.is_empty()
+}
+
+fn schedule_remaining_agent_promise_rejections(scope: &mut v8::PinScope<'_, '_>) {
+    let hosts: Vec<Rc<RefCell<PageScriptHost>>> = {
+        let Some(slot) = scope.get_slot_mut::<AgentPendingPromiseRejections>() else {
+            return;
+        };
+        if slot.0.is_empty() {
+            return;
+        }
+        slot.0.retain(|state| !state.pending.borrow().is_empty());
+        slot.0.iter().map(|state| state.host.clone()).collect()
+    };
+    for host in hosts {
+        let _ = host
+            .borrow_mut()
+            .queue_pending_promise_rejection_flush_task();
+    }
+}
+
 pub(super) fn promise_reject_dispatch_slot(
     host_rc: Rc<RefCell<PageScriptHost>>,
 ) -> PromiseRejectDispatchSlot {
@@ -320,6 +346,7 @@ pub(crate) fn perform_microtask_checkpoint_and_report_pending_promise_rejections
     }
     let ran_end_of_checkpoint_tasks =
         crate::context_bootstrap::run_end_of_microtask_checkpoint_tasks(scope);
+    schedule_remaining_agent_promise_rejections(scope);
     if (pending_rejections > 0 || ran_end_of_checkpoint_tasks > 0)
         && let Some(pressure) =
             scope.get_slot::<Arc<super::document_isolate::IsolateNativeMemoryPressure>>()

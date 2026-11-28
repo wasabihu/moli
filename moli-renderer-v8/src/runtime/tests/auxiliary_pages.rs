@@ -601,3 +601,129 @@ async fn abandoning_auxiliary_adoption_retires_only_the_reserved_page() {
     assert_eq!(runtime.renderer_page_count_for_testing(), 1);
     page.close_async().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn adopted_same_origin_popup_wakes_opener_pending_await_promise_without_timer() {
+    let runtime = JsRuntime::initialize();
+    runtime
+        .browser_context_runtime()
+        .delegate_auxiliary_document_responses_to_browser();
+    let (tx, mut rx) = renderer_external_activity_test_channel();
+    runtime.set_renderer_output_transport_sender(tx);
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    let mut opener = create_test_html_page_with_navigation_dispatch(
+        &runtime,
+        &loader,
+        url::Url::parse("https://example.test/opener-cross-page-await").unwrap(),
+        "<!doctype html><body>opener</body>",
+        RendererTopLevelNavigationDispatch::DelegateToBrowser,
+    )
+    .await;
+    rx.drain();
+    opener
+        .run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: "window.__popup = open('about:blank', 'cross-page-await'); true".to_owned(),
+            await_promise: false,
+        })
+        .await
+        .expect("opener should open auxiliary popup");
+    let publications = rx.drain();
+    let activations = popup_activations_for_page(&publications, &opener);
+    assert_eq!(activations.len(), 1);
+    let pending = activations[0].pending_auxiliary_page().unwrap();
+    let crate::RendererPopupActivationParts {
+        session_storage_store: session_storage,
+        initial_empty_document_storage_key: storage_key,
+        ..
+    } = activations[0].clone().into_parts();
+    let blank = url::Url::parse("about:blank").unwrap();
+    let (mut popup, _, _, _, _) = runtime
+        .start_create_html_page_from_response(
+            pending.page_reservation(),
+            blank.clone(),
+            blank,
+            None,
+            false,
+            0,
+            200,
+            vec![("content-type".to_owned(), b"text/html".to_vec())],
+            &loader,
+            crate::RendererWebStorageHandles::new(
+                crate::new_shared_web_storage_store(),
+                session_storage.unwrap(),
+            ),
+            "<!doctype html><body>popup</body>".to_owned(),
+            storage_key,
+            RendererTopLevelNavigationDispatch::DelegateToBrowser,
+            crate::RendererDocumentOptions::default(),
+        )
+        .unwrap()
+        .await_ready()
+        .await
+        .unwrap();
+
+    // Start an awaitPromise evaluation on the opener with no opener timer, then
+    // yield briefly so the owner loop parks it on PageActivity.
+    let pending_opener = opener
+        .enqueue_async_command(RendererPageCommand::EvaluateExpression {
+            expression:
+                "new Promise(resolve => { globalThis.__resolveOpenerFromPopup = resolve; })"
+                    .to_owned(),
+            await_promise: true,
+        })
+        .expect("opener awaitPromise expression should enqueue");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (popup_reply, _) = popup
+        .run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: "opener.__resolveOpenerFromPopup('settled-by-popup'); 'resolved'"
+                .to_owned(),
+            await_promise: false,
+        })
+        .await
+        .expect("popup should resolve opener promise");
+    assert_eq!(
+        renderer_json_value(popup_reply),
+        Some(serde_json::json!("resolved"))
+    );
+
+    let output = tokio::time::timeout(Duration::from_secs(2), pending_opener.wait())
+        .await
+        .expect("cross-Page promise settlement must wake the awaiting opener Page promptly")
+        .expect("opener awaitPromise should succeed");
+    let (completion, _) = output.into_completion_and_predecessor();
+    let (opener_reply, _, _) = completion.into_parts();
+    assert_eq!(
+        renderer_json_value(opener_reply),
+        Some(serde_json::json!("settled-by-popup"))
+    );
+
+    // Also verify `WaitForScriptTruthy` awaits a cross-Page promise on the
+    // opener with no opener timer and wakes promptly when the popup resolves it.
+    let pending_truthy = opener
+        .enqueue_async_command(RendererPageCommand::WaitForScriptTruthy {
+            expression:
+                "() => new Promise(resolve => { globalThis.__resolveTruthyFromPopup = resolve; })"
+                    .to_owned(),
+            timeout_ms: 2_000,
+            loader: loader.clone(),
+        })
+        .expect("opener WaitForScriptTruthy should enqueue");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    popup
+        .run_async_command(RendererPageCommand::EvaluateExpression {
+            expression: "opener.__resolveTruthyFromPopup(true); 'truthy-resolved'".to_owned(),
+            await_promise: false,
+        })
+        .await
+        .expect("popup should resolve opener WaitForScriptTruthy promise");
+
+    tokio::time::timeout(Duration::from_secs(2), pending_truthy.wait())
+        .await
+        .expect("cross-Page promise settlement must wake opener WaitForScriptTruthy promptly")
+        .expect("opener WaitForScriptTruthy should succeed");
+
+    popup.close_async().await.unwrap();
+    opener.close_async().await.unwrap();
+}

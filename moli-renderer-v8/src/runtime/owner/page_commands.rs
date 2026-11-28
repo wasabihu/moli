@@ -744,15 +744,13 @@ impl RendererOwnerHandle {
         loader: ResourceRequestClient,
         capture_policy: super::RendererPageStateCapturePolicy,
     ) -> RenderRuntimeDispatchOutcome {
-        let mut entry = match take_entry_for_command_on_bound_owner_local_store(token) {
+        let entry = match take_entry_for_command_on_bound_owner_local_store(token) {
             Ok(entry) => entry,
             Err(error) => return Err(error).into(),
         };
         let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            entry
-                .page_vm_mut()
-                .cancel_pending_runtime_evaluate(pending_call);
+        let deadline_expired = remaining.is_zero();
+        if deadline_expired && pending_call.is_none() {
             self.restore_live_page_entry(token, entry);
             return Err(anyhow!("timed out waiting for script to become truthy")).into();
         }
@@ -779,6 +777,13 @@ impl RendererOwnerHandle {
                 .await
             }
             Ok(PageVmScriptTruthyWaitAdvance::Progressed { pending_call }) => {
+                if deadline_expired || Instant::now() >= deadline {
+                    entry
+                        .page_vm_mut()
+                        .cancel_pending_runtime_evaluate(pending_call);
+                    self.restore_live_page_entry(token, entry);
+                    return Err(anyhow!("timed out waiting for script to become truthy")).into();
+                }
                 self.restore_live_page_entry(token, entry);
                 RenderRuntimeDispatchOutcome::ContinueNextTurn(Box::new(
                     RenderRuntimeTurn::WaitLivePageScriptTruthy {
@@ -842,15 +847,13 @@ impl RendererOwnerHandle {
         navigation_policy: RuntimeEvaluationNavigationPolicy,
         capture_policy: super::RendererPageStateCapturePolicy,
     ) -> RenderRuntimeDispatchOutcome {
-        let mut entry = match take_entry_for_command_on_bound_owner_local_store(token) {
+        let entry = match take_entry_for_command_on_bound_owner_local_store(token) {
             Ok(entry) => entry,
             Err(error) => return Err(error).into(),
         };
         let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            entry
-                .page_vm_mut()
-                .cancel_pending_runtime_evaluate(pending_call);
+        let deadline_expired = remaining.is_zero();
+        if deadline_expired && pending_call.is_none() {
             self.restore_live_page_entry(token, entry);
             return Err(anyhow!(
                 "timed out waiting for runtime expression awaitPromise"
@@ -898,6 +901,16 @@ impl RendererOwnerHandle {
                 }
             }
             Ok(PageVmRuntimeExpressionAwaitAdvance::Progressed { pending_call }) => {
+                if deadline_expired || Instant::now() >= deadline {
+                    entry
+                        .page_vm_mut()
+                        .cancel_pending_runtime_evaluate(pending_call);
+                    self.restore_live_page_entry(token, entry);
+                    return Err(anyhow!(
+                        "timed out waiting for runtime expression awaitPromise"
+                    ))
+                    .into();
+                }
                 self.restore_live_page_entry(token, entry);
                 RenderRuntimeDispatchOutcome::ContinueNextTurn(Box::new(
                     RenderRuntimeTurn::WaitLivePageRuntimeExpressionAwait {

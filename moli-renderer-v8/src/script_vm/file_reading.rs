@@ -51,7 +51,7 @@ impl ScriptVm {
         };
         self.with_default_context_scope(|scope, host_ptr| {
             Ok(
-                unsafe { &mut *host_ptr }.dispatch_authorized_file_reading_task(
+                crate::native_bridge::PageScriptHost::dispatch_authorized_file_reading_task(
                     scope,
                     host_ptr,
                     owner.target(),
